@@ -48,7 +48,40 @@ function longestDailyStreak(sortedDateKeys) {
   return { longest, current };
 }
 
-export function computeInsights({ history = [], dishes = [], familyMembers = [], settings = null } = {}) {
+/**
+ * How often the top suggestion was good enough to accept.
+ *
+ * This is the number the engine should be judged on. A `suggested` event fires once
+ * per distinct top pick shown; `accepted` means the household took it as offered,
+ * `accepted_alternative` means they took a different dish from the list, and
+ * `rejected` means they asked for something else without accepting. Only pairs where
+ * a suggestion was actually shown are counted, so the ratio is not diluted by
+ * meals that were logged manually.
+ */
+function summariseSuggestionQuality(usageEvents) {
+  const shown = usageEvents.filter((e) => e.type === 'suggested').length;
+  const accepted = usageEvents.filter((e) => e.type === 'accepted').length;
+  const alternatives = usageEvents.filter((e) => e.type === 'accepted_alternative').length;
+  const rejected = usageEvents.filter((e) => e.type === 'rejected').length;
+
+  // Accepted either way counts as "the list contained something they wanted";
+  // `topPickRate` isolates how often the first choice alone was right.
+  const outcomes = accepted + alternatives + rejected;
+  return {
+    suggestionsShown: shown,
+    suggestionsAccepted: accepted,
+    suggestionsAcceptedAlternative: alternatives,
+    suggestionsRejected: rejected,
+    /** Share of acted-on suggestions that were taken as offered. */
+    topPickRate: outcomes === 0 ? null : +(accepted / outcomes).toFixed(3),
+    /** Share of acted-on suggestions that were taken at all. */
+    listAcceptanceRate: outcomes === 0 ? null : +((accepted + alternatives) / outcomes).toFixed(3),
+  };
+}
+
+export function computeInsights({
+  history = [], dishes = [], familyMembers = [], settings = null, usageEvents = [],
+} = {}) {
   const dishById = new Map(dishes.map((d) => [d.id, d]));
 
   const dateKeys = [...new Set(history.map((e) => e.date))].sort();
@@ -90,12 +123,8 @@ export function computeInsights({ history = [], dishes = [], familyMembers = [],
   // --- Customisation: is the household making the app its own? ---
   const customDishes = dishes.filter((d) => d.isCustom).length;
 
-  // --- Suggestion quality proxy ---
-  // An accepted suggestion is logged; a swap is logged only if the user then accepted
-  // something else. `swaps` therefore counts meals whose dish differs from what the
-  // engine offered first — recorded by the caller, not derivable here — so this
-  // reports the volume that the number is a ratio *of*.
   const totalPlanned = history.length;
+  const suggestionQuality = summariseSuggestionQuality(usageEvents);
 
   const firstMeal = dateKeys[0] || null;
   const daysSinceFirstMeal = firstMeal ? daysBetween(firstMeal, toLocalDateKey(now)) : 0;
@@ -127,6 +156,9 @@ export function computeInsights({ history = [], dishes = [], familyMembers = [],
     ratingCoverage: +ratingCoverage.toFixed(3),
     wontTouchCount,
 
+    // Suggestion quality: the signal that decides whether new features are worth it
+    ...suggestionQuality,
+
     // Configuration, so a support or review conversation has context
     mealsPerDay: settings?.mealsPerDay ?? null,
     theme: settings?.theme ?? null,
@@ -149,6 +181,9 @@ export function formatInsightsForSharing(insights) {
     `Variety: ${insights.distinctDishes} distinct dishes, ${insights.distinctProteins} proteins, ${insights.distinctDishTypes} dish types`,
     `Household: ${insights.familyMembers} members, ${insights.ratingsGiven}/${insights.ratingsPossible} preferences rated (${Math.round(insights.ratingCoverage * 100)}%)`,
     `Custom recipes: ${insights.customDishes}`,
+    insights.topPickRate === null
+      ? 'Suggestion quality: not enough data yet'
+      : `Suggestion quality: top pick accepted ${Math.round(insights.topPickRate * 100)}%, any suggestion ${Math.round(insights.listAcceptanceRate * 100)}% (${insights.suggestionsShown} shown)`,
     `Settings: ${insights.mealsPerDay} meal(s)/day, cooldowns ${insights.cooldowns ? `${insights.cooldowns.sameDish}/${insights.cooldowns.sameProtein}/${insights.cooldowns.sameDishType}` : 'n/a'}`,
   ];
   return lines.join('\n');

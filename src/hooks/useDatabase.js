@@ -15,6 +15,7 @@ import {
   updateDietaryRule,
   deleteDietaryRule,
   updateSettings,
+  getUsageEvents,
 } from '../data/db';
 
 export const useDishes = () => {
@@ -97,5 +98,15 @@ export const useSettings = () => {
     loading,
     updateSettings,
     refreshSettings: () => {}
+  };
+};
+
+export const useUsageEvents = () => {
+  const events = useLiveQuery(() => getUsageEvents());
+  const loading = events === undefined;
+
+  return {
+    events: events || [],
+    loading,
   };
 };

@@ -54,6 +54,23 @@ export function applySchema(instance) {
     });
   });
 
+  /**
+   * v3: add a usage-events log.
+   *
+   * This records what the planner offered and what the household did with it, which
+   * is the only way to tell whether the recommendation engine is actually landing.
+   * It is append-only and pruned, and it never leaves the device — the app has no
+   * telemetry, so this is the sole source of that signal.
+   */
+  instance.version(3).stores({
+    dishes: 'id, nameEn, proteinType, dishType, cuisineType, isCustom',
+    familyMembers: '++id, name, role',
+    cookingHistory: '++id, date, mealType, dishId',
+    dietaryRules: '++id, ruleType, category, value, isActive',
+    settings: 'id',
+    usageEvents: '++id, type, date, dishId, mealType, suggestedDishId',
+  });
+
   return instance;
 }
 
@@ -199,6 +216,94 @@ export const setMemberPreference = async (memberId, dishId, value, instance = db
   await instance.familyMembers.update(memberId, { preferences });
 };
 
+// ---------------------------------------------------------- Usage events
+/**
+ * What the planner offered and what happened to it.
+ *
+ * Recorded so the engine can be judged rather than assumed. `suggested` fires once
+ * per distinct top pick shown; the outcome events record what the household did.
+ * Append-only, capped, and never transmitted.
+ */
+export const USAGE_EVENT = Object.freeze({
+  SUGGESTED: 'suggested',
+  ACCEPTED: 'accepted',
+  /** Accepted the top pick. */
+  ACCEPTED_ALTERNATIVE: 'accepted_alternative',
+  /** Asked for something else. */
+  REJECTED: 'rejected',
+  /** The logged meal was removed again. */
+  UNDONE: 'undone',
+});
+
+/** Keep the log bounded; a household generates a handful of events a day. */
+const MAX_USAGE_EVENTS = 5000;
+
+/**
+ * Event types that describe a *state of the world* rather than a discrete action.
+ * Offering the same dish for the same meal slot twice (which happens on every page
+ * load) is one fact, not two, so these are de-duplicated per day.
+ */
+const IDEMPOTENT_PER_DAY = new Set([USAGE_EVENT.SUGGESTED]);
+
+/**
+ * Keys currently being written, so concurrent callers cannot both pass the
+ * "has this been recorded?" check before either insert lands.
+ *
+ * The check-then-insert below is read-then-write and therefore racy: React
+ * double-invokes mount effects, and a test with three simultaneous writes produced
+ * three rows. Claiming synchronously — before any await — closes that window.
+ * The database lookup is still kept because it is what catches a genuinely repeated
+ * offer across app restarts, where this in-memory map starts empty.
+ */
+const inFlightEventKeys = new Set();
+
+export const recordUsageEvent = async (event, instance = db) => {
+  if (!event?.type) return null;
+
+  const dedupeKey = IDEMPOTENT_PER_DAY.has(event.type) && event.date && event.dishId
+    ? `${event.type}|${event.date}|${event.mealType ?? ''}|${event.dishId}`
+    : null;
+
+  if (dedupeKey) {
+    if (inFlightEventKeys.has(dedupeKey)) return null;
+    inFlightEventKeys.add(dedupeKey);
+  }
+
+  try {
+    if (dedupeKey) {
+      const already = await instance.usageEvents
+        .where('date').equals(event.date)
+        .filter((e) => e.type === event.type && e.dishId === event.dishId && e.mealType === event.mealType)
+        .count();
+      if (already > 0) return null;
+    }
+
+    const id = await instance.usageEvents.add({
+    type: event.type,
+    date: event.date ?? null,
+    dishId: event.dishId ?? null,
+    mealType: event.mealType ?? null,
+    suggestedDishId: event.suggestedDishId ?? null,
+    at: new Date().toISOString(),
+  });
+
+    const count = await instance.usageEvents.count();
+    if (count > MAX_USAGE_EVENTS) {
+      // Trim the oldest overflow in one pass rather than checking on every write.
+      const excess = count - MAX_USAGE_EVENTS;
+      const oldest = await instance.usageEvents.orderBy('id').limit(excess).primaryKeys();
+      await instance.usageEvents.bulkDelete(oldest);
+    }
+    return id;
+  } finally {
+    // Released either way, so a failed write does not permanently block the key.
+    if (dedupeKey) inFlightEventKeys.delete(dedupeKey);
+  }
+};
+
+export const getUsageEvents = (instance = db) => instance.usageEvents.toArray();
+export const clearUsageEvents = (instance = db) => instance.usageEvents.clear();
+
 // ------------------------------------------------------ Cooking history
 export const getCookingHistory = (startDate, endDate) => {
   if (startDate && endDate) {
@@ -249,12 +354,13 @@ const BACKUP_VERSION = 2;
 
 /** A JSON-serialisable snapshot of everything the user owns. */
 export async function exportAllData(instance = db) {
-  const [dishes, familyMembers, cookingHistory, dietaryRules, settings] = await Promise.all([
+  const [dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents] = await Promise.all([
     instance.dishes.toArray(),
     instance.familyMembers.toArray(),
     instance.cookingHistory.toArray(),
     instance.dietaryRules.toArray(),
     instance.settings.toArray(),
+    instance.usageEvents.toArray(),
   ]);
 
   // Usage insights travel with the backup. They are derived from the data above,
@@ -265,6 +371,7 @@ export async function exportAllData(instance = db) {
     dishes,
     familyMembers,
     settings: settings[0] || null,
+    usageEvents,
   });
 
   return {
@@ -277,9 +384,10 @@ export async function exportAllData(instance = db) {
       familyMembers: familyMembers.length,
       cookingHistory: cookingHistory.length,
       dietaryRules: dietaryRules.length,
+      usageEvents: usageEvents.length,
     },
     insights,
-    data: { dishes, familyMembers, cookingHistory, dietaryRules, settings },
+    data: { dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents },
   };
 }
 
@@ -304,6 +412,7 @@ export function validateBackup(payload) {
     cookingHistory: Array.isArray(data.cookingHistory) ? data.cookingHistory : [],
     dietaryRules: Array.isArray(data.dietaryRules) ? data.dietaryRules : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
+    usageEvents: Array.isArray(data.usageEvents) ? data.usageEvents : [],
   };
 }
 
@@ -329,6 +438,9 @@ export async function importAllData(payload, instance = db) {
     instance.cookingHistory,
     instance.dietaryRules,
     instance.settings,
+    // Must be listed: Dexie scopes a transaction to the tables it is given, and
+    // touching an unlisted table throws at runtime rather than silently no-oping.
+    instance.usageEvents,
     async () => {
       await Promise.all([
         instance.dishes.clear(),
@@ -336,6 +448,7 @@ export async function importAllData(payload, instance = db) {
         instance.cookingHistory.clear(),
         instance.dietaryRules.clear(),
         instance.settings.clear(),
+        instance.usageEvents.clear(),
       ]);
       // bulkPut, not bulkAdd: primary keys are part of the backup and every reference
       // (dishId, preferences keys) depends on them surviving the round trip.
@@ -344,6 +457,7 @@ export async function importAllData(payload, instance = db) {
       if (data.cookingHistory.length) await instance.cookingHistory.bulkPut(data.cookingHistory);
       if (dietaryRules.length) await instance.dietaryRules.bulkPut(dietaryRules);
       if (data.settings.length) await instance.settings.bulkPut(data.settings);
+      if (data.usageEvents.length) await instance.usageEvents.bulkPut(data.usageEvents);
     },
   );
 

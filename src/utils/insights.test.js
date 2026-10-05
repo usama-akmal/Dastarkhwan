@@ -196,3 +196,78 @@ describe('insights report today correctly', () => {
     expect(r.currentStreak).toBe(r.longestStreak);
   });
 });
+
+
+describe('computeInsights — suggestion quality', () => {
+  const ev = (type, extra = {}) => ({ type, ...extra });
+
+  it('reports null rather than a misleading zero before anything was shown', () => {
+    const r = computeInsights({ history: [], dishes, usageEvents: [] });
+    expect(r.topPickRate).toBeNull();
+    expect(r.listAcceptanceRate).toBeNull();
+    expect(r.suggestionsShown).toBe(0);
+  });
+
+  it('computes the first-choice rate from outcomes, not from suggestions shown', () => {
+    // 1 shown, accepted as offered. A suggestion that was merely displayed and never
+    // acted on must not count as a rejection.
+    const usageEvents = [
+      ev('suggested', { dishId: 'a' }),
+      ev('accepted', { dishId: 'a' }),
+    ];
+    const r = computeInsights({ history: [], dishes, usageEvents });
+    expect(r.suggestionsShown).toBe(1);
+    expect(r.suggestionsAccepted).toBe(1);
+    expect(r.topPickRate).toBe(1);
+    expect(r.listAcceptanceRate).toBe(1);
+  });
+
+  it('separates a wrong first choice from a useful list', () => {
+    const usageEvents = [
+      ev('suggested', { dishId: 'a' }),
+      ev('accepted_alternative', { dishId: 'b', suggestedDishId: 'a' }),
+      ev('suggested', { dishId: 'c' }),
+      ev('rejected', { dishId: 'c' }),
+    ];
+    const r = computeInsights({ history: [], dishes, usageEvents });
+    // One outcome taken, and it was not the first choice.
+    expect(r.topPickRate).toBe(0);
+    expect(r.listAcceptanceRate).toBe(0.5);
+    expect(r.suggestionsAcceptedAlternative).toBe(1);
+    expect(r.suggestionsRejected).toBe(1);
+  });
+
+  it('ignores displayed-but-unacted suggestions in the ratio', () => {
+    // Five suggestions shown, one accepted. The rate is 1/1, because the other four
+    // were never resolved — counting them would understate the engine.
+    const usageEvents = [
+      ...[1, 2, 3, 4, 5].map((n) => ev('suggested', { dishId: `d${n}` })),
+      ev('accepted', { dishId: 'd1' }),
+    ];
+    const r = computeInsights({ history: [], dishes, usageEvents });
+    expect(r.suggestionsShown).toBe(5);
+    expect(r.topPickRate).toBe(1);
+  });
+
+  it('handles a mixed history without producing NaN', () => {
+    const usageEvents = [
+      ev('suggested', { dishId: 'a' }), ev('accepted', { dishId: 'a' }),
+      ev('suggested', { dishId: 'b' }), ev('rejected', { dishId: 'b' }),
+      ev('suggested', { dishId: 'c' }), ev('accepted_alternative', { dishId: 'd' }),
+    ];
+    const r = computeInsights({ history: [], dishes, usageEvents });
+    expect(r.topPickRate).toBeCloseTo(1 / 3, 3);
+    expect(r.listAcceptanceRate).toBeCloseTo(2 / 3, 3);
+  });
+
+  it('includes the rate in the shareable summary when available', () => {
+    const usageEvents = [ev('suggested', { dishId: 'a' }), ev('accepted', { dishId: 'a' })];
+    const text = formatInsightsForSharing(computeInsights({ history: [], dishes, usageEvents }));
+    expect(text).toMatch(/Suggestion quality: top pick accepted 100%/);
+  });
+
+  it('says so plainly when there is not enough data', () => {
+    const text = formatInsightsForSharing(computeInsights({ history: [], dishes }));
+    expect(text).toMatch(/Suggestion quality: not enough data yet/);
+  });
+});

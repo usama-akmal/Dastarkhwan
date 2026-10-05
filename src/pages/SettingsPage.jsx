@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useSettings, useDietaryRules, useCookingHistory, useDishes, useFamilyMembers } from '../hooks/useDatabase';
+import { useSettings, useDietaryRules, useCookingHistory, useDishes, useFamilyMembers, useUsageEvents } from '../hooks/useDatabase';
 import {
   db,
   restoreDefaultDishes,
@@ -81,13 +81,14 @@ export const SettingsPage = () => {
   const { history } = useCookingHistory();
   const { dishes } = useDishes();
   const { members } = useFamilyMembers();
+  const { events: usageEvents } = useUsageEvents();
   const { mode, setTheme } = useTheme();
 
   // Computed on-device from the user's own data. There is no telemetry in this app,
   // so this is the only way either of us can tell whether it is actually being used.
   const insights = useMemo(
-    () => computeInsights({ history, dishes, familyMembers: members, settings }),
-    [history, dishes, members, settings],
+    () => computeInsights({ history, dishes, familyMembers: members, settings, usageEvents }),
+    [history, dishes, members, settings, usageEvents],
   );
 
   const [draft, setDraft] = useState({});
@@ -352,6 +353,33 @@ export const SettingsPage = () => {
                   : 'Higher coverage means suggestions follow your family rather than chance.'}
               </p>
             </div>
+
+            {/* Suggestion quality. This is the number that says whether the
+                recommendations actually land, and therefore whether building more
+                on top of them is worth it. */}
+            {insights.topPickRate !== null && (
+              <div style={{ marginTop: 'var(--space-5)' }}>
+                <div className="row-between" style={{ marginBottom: 'var(--space-1)' }}>
+                  <span className="form-label">Suggestions accepted</span>
+                  <span className="tabular" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                    {Math.round(insights.topPickRate * 100)}% first choice
+                  </span>
+                </div>
+                <div className="stat-bar">
+                  <div className="stat-bar__fill" style={{ width: `${insights.topPickRate * 100}%` }} />
+                </div>
+                <p className="form-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+                  {insights.suggestionsShown} suggestion{insights.suggestionsShown === 1 ? '' : 's'} shown.
+                  {' '}You took one of them {Math.round(insights.listAcceptanceRate * 100)}% of the time
+                  ({insights.suggestionsAccepted} as offered, {insights.suggestionsAcceptedAlternative} from the list,
+                  {' '}{insights.suggestionsRejected} swapped away).
+                  {insights.topPickRate < 0.4 && insights.listAcceptanceRate >= 0.6
+                    && ' The list usually has something you want, but rarely the first choice — the ranking needs work.'}
+                  {insights.listAcceptanceRate < 0.6
+                    && ' A low rate here means the suggestions are not landing.'}
+                </p>
+              </div>
+            )}
 
             {insights.customDishes > 0 && (
               <p className="form-hint" style={{ marginTop: 'var(--space-4)', marginBottom: 0 }}>

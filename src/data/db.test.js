@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Dexie from 'dexie';
 import {
   createDatabase,
   initializeDatabase,
@@ -10,6 +11,9 @@ import {
   deleteDish,
   addDish,
   setMemberPreference,
+  recordUsageEvent,
+  getUsageEvents,
+  USAGE_EVENT,
   DEFAULT_SETTINGS,
 } from './db.js';
 import { seedDishes } from './seed.js';
@@ -248,5 +252,164 @@ describe('validateBackup', () => {
     const result = validateBackup({ format: 'dastarkhwan-backup', version: 2, data: { dishes: [], familyMembers: [] } });
     expect(result.cookingHistory).toEqual([]);
     expect(result.dietaryRules).toEqual([]);
+  });
+});
+
+
+describe('usage events (the acceptance-rate signal)', () => {
+  it('records an event with a timestamp', async () => {
+    await recordUsageEvent({ type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:x', mealType: 'dinner' }, db);
+    const events = await getUsageEvents(db);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('suggested');
+    expect(events[0].dishId).toBe('seed:x');
+    expect(typeof events[0].at).toBe('string');
+  });
+
+  it('records the same suggestion only once per day, however many times the page loads', async () => {
+    // The suggested event fires on mount, so this must be idempotent or the
+    // "suggestions shown" count would grow with every reload.
+    const event = { type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:x', mealType: 'dinner' };
+    await recordUsageEvent(event, db);
+    await recordUsageEvent(event, db);
+    await recordUsageEvent(event, db);
+    expect(await getUsageEvents(db)).toHaveLength(1);
+
+    // A different meal slot, or a different day, is a genuinely new suggestion.
+    await recordUsageEvent({ ...event, mealType: 'lunch' }, db);
+    await recordUsageEvent({ ...event, date: '2026-10-06' }, db);
+    expect(await getUsageEvents(db)).toHaveLength(3);
+  });
+
+  it('does not de-duplicate outcome events, which are discrete actions', async () => {
+    const base = { type: USAGE_EVENT.REJECTED, date: '2026-10-05', dishId: 'seed:x', mealType: 'dinner' };
+    await recordUsageEvent(base, db);
+    await recordUsageEvent(base, db);
+    expect(await getUsageEvents(db)).toHaveLength(2);
+  });
+
+  it('ignores a malformed event rather than storing a useless row', async () => {
+    expect(await recordUsageEvent({}, db)).toBeNull();
+    expect(await recordUsageEvent(null, db)).toBeNull();
+    expect(await getUsageEvents(db)).toHaveLength(0);
+  });
+
+  it('survives a backup round trip, so measurement is not lost on a device change', async () => {
+    await recordUsageEvent({ type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:x', mealType: 'dinner' }, db);
+    await recordUsageEvent({ type: USAGE_EVENT.ACCEPTED, date: '2026-10-05', dishId: 'seed:x', mealType: 'dinner' }, db);
+
+    const payload = JSON.parse(JSON.stringify(await exportAllData(db)));
+    expect(payload.data.usageEvents).toHaveLength(2);
+    expect(payload.counts.usageEvents).toBe(2);
+    // The computed rate travels too.
+    expect(payload.insights.suggestionsShown).toBe(1);
+    expect(payload.insights.topPickRate).toBe(1);
+
+    // Wipe, then restore.
+    await Promise.all([
+      db.dishes.clear(), db.familyMembers.clear(), db.cookingHistory.clear(),
+      db.dietaryRules.clear(), db.settings.clear(), db.usageEvents.clear(),
+    ]);
+    expect(await getUsageEvents(db)).toHaveLength(0);
+
+    await importAllData(payload, db);
+
+    const restored = await getUsageEvents(db);
+    expect(restored).toHaveLength(2);
+    expect(restored.map((e) => e.type).sort()).toEqual(['accepted', 'suggested']);
+  });
+
+  it('restores when a backup carries no usage events at all (older file)', async () => {
+    // Backups made before this feature have no usageEvents key; restoring must not throw.
+    const legacy = {
+      format: 'dastarkhwan-backup',
+      version: 1,
+      data: {
+        dishes: [{ id: 'seed:x', nameEn: 'X', isCustom: false }],
+        familyMembers: [{ id: 1, name: 'A', role: 'mother', preferences: {} }],
+        cookingHistory: [],
+        dietaryRules: [],
+        settings: [{ ...DEFAULT_SETTINGS }],
+      },
+    };
+    await expect(importAllData(legacy, db)).resolves.toBeDefined();
+    expect(await getUsageEvents(db)).toHaveLength(0);
+  });
+});
+
+
+describe('migration from an older install', () => {
+  it('adds the usage-events table to a v2 database without losing data', async () => {
+    // Simulate a real upgrade: build a database at the previous version, put data in
+    // it, close it, then open it with the current schema. This is the path every
+    // existing user takes and it must not throw or drop anything.
+    const name = `dastarkhwan-migration-${Date.now()}`;
+
+    const old = new Dexie(name);
+    old.version(1).stores({
+      dishes: '++id, nameEn, proteinType, dishType, cuisineType, isCustom',
+      familyMembers: '++id, name, role',
+      cookingHistory: '++id, date, mealType, dishId',
+      dietaryRules: '++id, ruleType, category, value, isActive',
+      settings: 'id',
+    });
+    old.version(2).stores({
+      dishes: 'id, nameEn, proteinType, dishType, cuisineType, isCustom',
+      familyMembers: '++id, name, role',
+      cookingHistory: '++id, date, mealType, dishId',
+      dietaryRules: '++id, ruleType, category, value, isActive',
+      settings: 'id',
+    });
+    await old.open();
+    await old.dishes.add({ id: 'seed:existing', nameEn: 'Existing dish', isCustom: false });
+    await old.familyMembers.add({ name: 'Ammi', role: 'mother', preferences: { 'seed:existing': 'loves' } });
+    await old.cookingHistory.add({ dishId: 'seed:existing', date: '2026-10-01', mealType: 'dinner' });
+    old.close();
+
+    // Now open the same stored database with the current schema (v3).
+    const upgraded = createDatabase(name);
+    await upgraded.open();
+
+    expect(await upgraded.dishes.count()).toBe(1);
+    expect(await upgraded.cookingHistory.count()).toBe(1);
+    const member = await upgraded.familyMembers.get(1);
+    expect(member.preferences['seed:existing']).toBe('loves');
+
+    // The new table exists and is usable.
+    await recordUsageEvent({ type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:existing', mealType: 'dinner' }, upgraded);
+    expect(await getUsageEvents(upgraded)).toHaveLength(1);
+
+    await upgraded.delete();
+  });
+});
+
+
+describe('concurrent suggestion logging', () => {
+  // React double-invokes mount effects, so the same suggestion can be recorded twice
+  // before either insert lands. A check-then-insert is racy; these pin the fix.
+  it('writes one row when the same suggestion is recorded twice without awaiting', async () => {
+    const event = { type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:race', mealType: 'lunch' };
+    await Promise.all([recordUsageEvent(event, db), recordUsageEvent(event, db)]);
+    expect(await getUsageEvents(db)).toHaveLength(1);
+  });
+
+  it('writes one row when three fire concurrently', async () => {
+    const event = { type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', dishId: 'seed:race3', mealType: 'dinner' };
+    await Promise.all([
+      recordUsageEvent(event, db),
+      recordUsageEvent(event, db),
+      recordUsageEvent(event, db),
+    ]);
+    expect(await getUsageEvents(db)).toHaveLength(1);
+  });
+
+  it('still allows a different dish or slot through concurrently', async () => {
+    const base = { type: USAGE_EVENT.SUGGESTED, date: '2026-10-05', mealType: 'lunch' };
+    await Promise.all([
+      recordUsageEvent({ ...base, dishId: 'seed:a' }, db),
+      recordUsageEvent({ ...base, dishId: 'seed:b' }, db),
+      recordUsageEvent({ ...base, mealType: 'dinner', dishId: 'seed:a' }, db),
+    ]);
+    expect(await getUsageEvents(db)).toHaveLength(3);
   });
 });
