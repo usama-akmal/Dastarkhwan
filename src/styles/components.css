@@ -1440,3 +1440,32 @@ body:has(.modal-overlay) .bottom-nav {
 body:has(.modal-overlay) .fab {
   display: none;
 }
+
+/* ==========================================================================
+   UPDATE PROMPT
+   Sits above the bottom navigation so it never covers a primary action. Shown as
+   a prompt rather than an automatic reload, so a half-made meal choice is not lost.
+   ========================================================================== */
+
+.update-prompt {
+  position: fixed;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: calc(var(--nav-height) + var(--space-4) + env(safe-area-inset-bottom));
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: calc(var(--shell-max-width) - var(--space-8));
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-elevated);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), var(--shadow-accent);
+}
+
+/* Dialogs sit above it; there is no point prompting a reload through a modal. */
+body:has(.modal-overlay) .update-prompt {
+  display: none;
+}

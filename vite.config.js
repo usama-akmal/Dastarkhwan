@@ -7,7 +7,16 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // `prompt` rather than `autoUpdate`. With `autoUpdate` the plugin forcibly sets
+      // `workbox.skipWaiting = true` (vite-plugin-pwa dist/index.js), which makes a new
+      // worker activate the moment it installs — reloading the page out from under the
+      // user, potentially mid-task, and leaving no chance to show a prompt. With
+      // `prompt` the new worker waits, and the app asks before reloading.
+      registerType: 'prompt',
+      // The app registers the worker itself (src/pwa/useServiceWorkerUpdate.js) so it
+      // can detect a waiting update and offer a reload. Letting the plugin inject its
+      // own registration as well would register the same worker twice.
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         id: '/Dastarkhwan/',
@@ -46,6 +55,13 @@ export default defineConfig({
         // The app shell must be available offline immediately after install.
         navigateFallback: '/Dastarkhwan/index.html',
         cleanupOutdatedCaches: true,
+        // `skipWaiting` defaults to true, which makes a new worker activate the
+        // instant it installs. That reloaded the page out from under the user
+        // (potentially mid-task) and left no opportunity to show an update prompt.
+        // With it off, the new worker waits until the user accepts, and
+        // `skipWaiting()` is called from src/pwa/useServiceWorkerUpdate.js.
+        skipWaiting: false,
+        clientsClaim: true,
         // No runtimeCaching for fonts any more: fonts are self-hosted from src/fonts,
         // so they are fingerprinted and precached like any other app asset. That is
         // what makes the offline-first claim hold on the very first launch, with no

@@ -5,6 +5,8 @@ import { useSettings } from './hooks/useDatabase'
 import { AppShell } from './components/layout/AppShell'
 import { HomePage } from './pages/HomePage'
 import { Icon } from './components/ui/Icon'
+import { UpdatePrompt } from './components/ui/UpdatePrompt'
+import { useServiceWorkerUpdate } from './pwa/useServiceWorkerUpdate'
 
 /**
  * Route code splitting.
@@ -33,6 +35,10 @@ function App() {
   const [dbReady, setDbReady] = useState(false)
   const [dbError, setDbError] = useState(null)
   const { settings, loading: settingsLoading } = useSettings()
+  // Watching here means every screen benefits, and the prompt appears only once the
+  // app has finished starting up rather than on top of the splash.
+  const { updateReady, applyUpdate, dismissUpdate } = useServiceWorkerUpdate()
+  const showUpdatePrompt = updateReady && !settingsLoading
 
   useEffect(() => {
     initializeDatabase()
@@ -106,6 +112,9 @@ function App() {
 
   return (
     <AppShell>
+      {showUpdatePrompt && (
+        <UpdatePrompt onUpdate={applyUpdate} onDismiss={dismissUpdate} />
+      )}
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
