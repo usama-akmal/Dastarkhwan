@@ -1,8 +1,18 @@
 name: Deploy static content to Pages
 
+# Only the default branch publishes.
+#
+# The `github-pages` environment has a custom branch policy that allows `master`
+# alone, so a run from any other branch is rejected before its first step. That
+# rejection is not harmless: it shares the `pages` concurrency group below, so it
+# cancels the legitimate deploy from `master` and nothing ships. Restricting the
+# trigger here means another branch cannot cancel the real deployment.
+#
+# To publish from `main` instead, add `main` to the environment's deployment branch
+# policy in repository settings *and* to this list.
 on:
   push:
-    branches: ["master", "main"]
+    branches: ["master"]
   workflow_dispatch:
 
 permissions:
