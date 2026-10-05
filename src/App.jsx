@@ -1,14 +1,33 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { initializeDatabase } from './data/db'
 import { useSettings } from './hooks/useDatabase'
 import { AppShell } from './components/layout/AppShell'
-import OnboardingWizard from './components/onboarding/OnboardingWizard'
 import { HomePage } from './pages/HomePage'
-import { CalendarPage } from './pages/CalendarPage'
-import { RecipesPage } from './pages/RecipesPage'
-import { FamilyPage } from './pages/FamilyPage'
-import { SettingsPage } from './pages/SettingsPage'
+import { Icon } from './components/ui/Icon'
+
+/**
+ * Route code splitting.
+ *
+ * HomePage stays in the entry chunk because it is the first thing a returning user
+ * sees. Everything else is fetched on navigation, which keeps the initial download
+ * smaller on the mid-range mobile connections this app targets. The onboarding
+ * wizard is split too: it is only ever shown once, to brand-new users.
+ */
+const OnboardingWizard = lazy(() => import('./components/onboarding/OnboardingWizard'))
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const RecipesPage = lazy(() => import('./pages/RecipesPage').then((m) => ({ default: m.RecipesPage })))
+const FamilyPage = lazy(() => import('./pages/FamilyPage').then((m) => ({ default: m.FamilyPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+
+/** Neutral placeholder while a split chunk loads; avoids a layout jump. */
+const RouteFallback = () => (
+  <div style={{ padding: '16px 0' }} aria-busy="true" aria-live="polite">
+    <div className="skeleton" style={{ height: '32px', width: '45%', marginBottom: '20px', borderRadius: '8px' }} />
+    <div className="skeleton" style={{ height: '240px', borderRadius: 'var(--radius-lg)' }} />
+    <span className="sr-only">Loading…</span>
+  </div>
+)
 
 function App() {
   const [dbReady, setDbReady] = useState(false)
@@ -27,25 +46,24 @@ function App() {
   if (dbError) {
     return (
       <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--color-bg-primary)',
-        color: 'var(--color-error)',
-        padding: '2rem',
-        textAlign: 'center',
-        fontFamily: 'var(--font-body)'
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 'var(--space-4)', minHeight: '100dvh', padding: 'var(--space-8)',
+        textAlign: 'center', background: 'var(--surface-base)',
       }}>
-        <h2>⚠️ Database Error</h2>
-        <p>{dbError}</p>
-        <button 
-          className="btn btn-primary" 
-          onClick={() => window.location.reload()}
-          style={{ marginTop: '1rem' }}
-        >
-          Retry
+        <span style={{
+          display: 'grid', placeItems: 'center', width: 56, height: 56,
+          borderRadius: 'var(--radius-full)', background: 'var(--danger-soft)', color: 'var(--danger)',
+        }}>
+          <Icon name="warning" size={26} />
+        </span>
+        <h1 style={{ margin: 0, fontFamily: 'var(--font-heading)', fontSize: 'var(--text-xl)' }}>
+          The database could not be opened
+        </h1>
+        <p style={{ margin: 0, maxWidth: '36ch', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+          {dbError}
+        </p>
+        <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+          <Icon name="refresh" size={17} /> Try again
         </button>
       </div>
     )
@@ -54,50 +72,49 @@ function App() {
   if (!dbReady || settingsLoading) {
     return (
       <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--color-bg-primary)',
-        color: 'var(--color-primary)',
-        fontFamily: 'var(--font-heading)'
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 'var(--space-3)', minHeight: '100dvh', background: 'var(--surface-base)',
+        backgroundImage: 'var(--ambient-1), var(--ambient-2)',
       }}>
-        <div className="animate-pulse" style={{ fontSize: '2.5rem', fontWeight: 700 }}>
+        <span
+          className="animate-pulse"
+          style={{
+            fontFamily: 'var(--font-heading)', fontSize: 'var(--text-3xl)',
+            fontWeight: 'var(--weight-bold)', letterSpacing: '-0.035em',
+            background: 'var(--gradient-primary)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}
+        >
           Dastarkhwan
-        </div>
-        <div style={{ 
-          fontFamily: "'Noto Nastaliq Urdu', serif", 
-          fontSize: '1.5rem', 
-          marginTop: '0.5rem',
-          color: 'var(--color-text-secondary)'
-        }}>
+        </span>
+        <span lang="ur" dir="rtl" style={{ fontFamily: 'var(--font-urdu)', fontSize: 'var(--text-xl)', color: 'var(--accent)', lineHeight: 1.6 }}>
           دسترخوان
-        </div>
-        <div className="skeleton" style={{ 
-          width: '200px', 
-          height: '4px', 
-          marginTop: '2rem',
-          borderRadius: '2px'
-        }} />
+        </span>
+        <div className="skeleton" style={{ width: 180, height: 4, marginTop: 'var(--space-4)' }} />
       </div>
     )
   }
 
   // Show onboarding if not completed
   if (!settings?.onboardingComplete) {
-    return <OnboardingWizard />
+    return (
+      <Suspense fallback={<div className="skeleton" style={{ height: '100vh' }} />}>
+        <OnboardingWizard />
+      </Suspense>
+    )
   }
 
   return (
     <AppShell>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/recipes" element={<RecipesPage />} />
-        <Route path="/family" element={<FamilyPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/recipes" element={<RecipesPage />} />
+          <Route path="/family" element={<FamilyPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </Suspense>
     </AppShell>
   )
 }

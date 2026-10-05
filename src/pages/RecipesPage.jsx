@@ -1,271 +1,377 @@
 import React, { useState } from 'react';
-import { useDishes } from '../hooks/useDatabase';
+import { useDishes, useFamilyMembers } from '../hooks/useDatabase';
+import { deleteDish, updateDish, setMemberPreference } from '../data/db';
+import { PREF, RULE_CATEGORY_VALUES, RULE_CATEGORIES } from '../utils/preferences';
+import { Icon } from '../components/ui/Icon';
+import { Modal } from '../components/ui/Modal';
+import { Checkbox } from '../components/ui/Controls';
+
+const PROTEIN_VALUES = RULE_CATEGORY_VALUES[RULE_CATEGORIES.PROTEIN_TYPE];
+const PROTEIN_FILTERS = ['All', ...PROTEIN_VALUES.map((p) => p.charAt(0).toUpperCase() + p.slice(1))];
+const DISH_TYPES = RULE_CATEGORY_VALUES[RULE_CATEGORIES.DISH_TYPE];
+const DIETARY_OPTIONS = RULE_CATEGORY_VALUES[RULE_CATEGORIES.DIETARY_TAGS];
+const CUISINE_TYPES = ['punjabi', 'sindhi', 'pathan', 'mughlai', 'chinese-pakistani', 'fast-food', 'general'];
+
+const emptyDish = () => ({
+  nameEn: '',
+  nameUr: '',
+  proteinType: 'chicken',
+  dishType: 'curry',
+  dietaryTags: [],
+  cuisineType: 'punjabi',
+});
 
 export const RecipesPage = () => {
   const { dishes, loading, addDish } = useDishes();
+  const { members } = useFamilyMembers();
+
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
-  const [newDish, setNewDish] = useState({
-    nameEn: '',
-    nameUr: '',
-    proteinType: 'chicken',
-    dishType: 'curry',
-    dietaryTags: [],
-    cuisineType: 'punjabi'
-  });
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState(emptyDish);
+  const [justAdded, setJustAdded] = useState(null);
 
-  const proteins = ['All', 'Chicken', 'Beef', 'Mutton', 'Fish', 'Eggs', 'Lentils', 'Vegetables'];
-  const dishTypes = ['curry', 'rice', 'roti-based', 'soup', 'fried', 'grilled', 'one-pot'];
-  const dietaryOptions = ['high-fat', 'low-fat', 'spicy', 'mild', 'quick', 'heavy', 'light'];
-  const cuisineTypes = ['punjabi', 'sindhi', 'pathan', 'mughlai', 'chinese-pakistani', 'fast-food'];
-
-  const filteredDishes = (dishes || []).filter(dish => {
-    const matchesSearch = (dish.nameEn?.toLowerCase().includes(search.toLowerCase())) || 
-                          (dish.nameUr?.includes(search));
+  const filteredDishes = (dishes || []).filter((dish) => {
+    const needle = search.toLowerCase();
+    const matchesSearch = dish.nameEn?.toLowerCase().includes(needle) || dish.nameUr?.includes(search);
     const matchesFilter = filter === 'All' || dish.proteinType?.toLowerCase() === filter.toLowerCase();
     return matchesSearch && matchesFilter;
   });
 
-  const handleAddSubmit = async (e) => {
-    e.preventDefault();
-    if (!newDish.nameEn) return;
-    await addDish(newDish);
-    setIsModalOpen(false);
-    setNewDish({
-      nameEn: '', nameUr: '', proteinType: 'chicken', 
-      dishType: 'curry', dietaryTags: [], cuisineType: 'punjabi'
-    });
+  const openAdd = () => {
+    setEditingId(null);
+    setDraft(emptyDish());
+    setIsModalOpen(true);
   };
 
-  const handleTagChange = (tag) => {
-    setNewDish(prev => {
-      const tags = prev.dietaryTags.includes(tag) 
-        ? prev.dietaryTags.filter(t => t !== tag)
-        : [...prev.dietaryTags, tag];
-      return { ...prev, dietaryTags: tags };
+  const openEdit = (dish) => {
+    setEditingId(dish.id);
+    setDraft({
+      nameEn: dish.nameEn || '',
+      nameUr: dish.nameUr || '',
+      proteinType: dish.proteinType || 'chicken',
+      dishType: dish.dishType || 'curry',
+      dietaryTags: dish.dietaryTags || [],
+      cuisineType: dish.cuisineType || 'punjabi',
     });
+    setIsModalOpen(true);
   };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const nameEn = draft.nameEn.trim();
+    if (!nameEn) return;
+
+    if (editingId != null) {
+      await updateDish(editingId, { ...draft, nameEn });
+      setIsModalOpen(false);
+      setEditingId(null);
+      return;
+    }
+
+    const id = await addDish({ ...draft, nameEn });
+    setIsModalOpen(false);
+    setDraft(emptyDish());
+    // Offer to rate it now — otherwise a new dish silently sits at "no opinion"
+    // and the user has to hunt for it among 80+ rows in Family.
+    setJustAdded({ id, name: nameEn });
+  };
+
+  const handleDelete = async (dish) => {
+    if (!window.confirm(`Delete "${dish.nameEn}"? Its cooking history and any family preferences for it will also be removed.`)) return;
+    try {
+      await deleteDish(dish.id);
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
+
+  const rateForEveryone = async (preference) => {
+    if (!justAdded) return;
+    for (const member of members || []) {
+      await setMemberPreference(member.id, justAdded.id, preference);
+    }
+    setJustAdded(null);
+  };
+
+  const toggleTag = (tag) => setDraft((prev) => ({
+    ...prev,
+    dietaryTags: prev.dietaryTags.includes(tag)
+      ? prev.dietaryTags.filter((t) => t !== tag)
+      : [...prev.dietaryTags, tag],
+  }));
 
   if (loading) {
     return (
-      <div className="animate-fade-in-up" style={{ padding: '16px 0' }}>
-        <h1 className="section-title" style={{ fontFamily: 'var(--font-heading)' }}>Recipes 🍲</h1>
-        <p>Loading dishes...</p>
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <div className="skeleton" style={{ height: 48, borderRadius: 'var(--radius-md)' }} />
+        <div className="skeleton" style={{ height: 200, borderRadius: 'var(--radius-lg)' }} />
       </div>
     );
   }
 
   return (
     <>
-      <div style={{ padding: '16px 0', position: 'relative' }} className="animate-fade-in-up">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h1 className="section-title" style={{ fontFamily: 'var(--font-heading)' }}>Recipes 🍲</h1>
-          <span style={{ color: 'var(--color-text-secondary)' }}>{filteredDishes.length} dishes</span>
-        </div>
-
-        <div style={{ marginBottom: '16px' }}>
-          <input 
-            id="recipe-search"
-            type="text" 
-            className="input" 
-            placeholder="Search recipes..." 
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ width: '100%', fontFamily: 'var(--font-body)' }} 
-          />
-        </div>
-
-        <div style={styles.filterContainer}>
-          {proteins.map(f => {
-            const isActive = filter === f;
-            const proteinClass = isActive && f !== 'All' ? `tag-pill--${f.toLowerCase()}` : '';
-            return (
-              <button
-                id={`filter-${f.toLowerCase()}`}
-                key={f}
-                className={`tag-pill ${proteinClass}`}
-                onClick={() => setFilter(f)}
-                style={{
-                  opacity: isActive ? 1 : 0.7,
-                  border: isActive ? 'none' : '1px solid var(--color-border)',
-                  backgroundColor: isActive ? '' : 'transparent',
-                  fontFamily: 'var(--font-body)'
-                }}
-              >
-                {f}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ ...styles.grid, paddingBottom: '120px' }}>
-          {filteredDishes.map((dish, i) => (
-            <div key={dish.id || i} id={`dish-card-${dish.id}`} className="card-elevated animate-fade-in-up animate-stagger-1" style={styles.recipeCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', color: 'var(--color-primary)', fontFamily: 'var(--font-heading)' }}>{dish.nameEn}</h3>
-                <span className={`tag-pill tag-pill--${dish.proteinType?.toLowerCase()}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
-                  {dish.proteinType}
-                </span>
-              </div>
-              {dish.nameUr && (
-                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--color-accent)', fontFamily: "'Noto Nastaliq Urdu', serif", direction: 'rtl' }}>
-                  {dish.nameUr}
-                </h4>
-              )}
-              <div style={{ marginTop: 'auto' }}>
-                <span className="tag-pill" style={{ fontSize: '10px' }}>{dish.dishType}</span>
-              </div>
-            </div>
-          ))}
-          {filteredDishes.length === 0 && (
-            <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: '32px 16px', color: 'var(--color-text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-              <div style={{ fontSize: '2rem' }}>🥣</div>
-              <p style={{ margin: 0 }}>No recipes found.</p>
-              <button 
-                className="btn-primary" 
-                onClick={() => setIsModalOpen(true)}
-              >
-                + Add a Recipe
-              </button>
-            </div>
-          )}
-        </div>
+      {/* ------------------------------------------------------------ Search */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+        minHeight: 'var(--control-height-md)',
+        padding: '0 var(--space-4)',
+        marginBottom: 'var(--space-4)',
+        background: 'var(--fill-subtle)',
+        border: '1px solid var(--border-default)',
+        borderRadius: 'var(--radius-full)',
+        transition: 'border-color var(--duration-fast) var(--ease-out)',
+      }}>
+        <Icon name="search" size={17} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+        <input
+          id="recipe-search"
+          type="search"
+          placeholder="Search dishes"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          aria-label="Search dishes"
+          style={{
+            flex: 1, minWidth: 0, border: 'none', background: 'transparent',
+            color: 'var(--text-primary)', font: 'inherit', outline: 'none', padding: 0,
+          }}
+        />
+        {search && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            aria-label="Clear search"
+            onClick={() => setSearch('')}
+            style={{ minWidth: 28, minHeight: 28, padding: 0 }}
+          >
+            <Icon name="close" size={14} />
+          </button>
+        )}
       </div>
 
-      <button 
-        id="fab-add-dish"
-        className="btn-primary hover-lift" 
-        style={styles.fab}
-        onClick={() => setIsModalOpen(true)}
-      >
-        +
+      {/* ----------------------------------------------------------- Filters */}
+      <div className="chip-row" role="group" aria-label="Filter by protein">
+        {PROTEIN_FILTERS.map((protein) => {
+          const isActive = filter === protein;
+          return (
+            <button
+              type="button"
+              id={`filter-${protein.toLowerCase()}`}
+              key={protein}
+              className={`tag-pill${isActive && protein !== 'All' ? ` tag-pill--${protein.toLowerCase()}` : ''}`}
+              aria-pressed={isActive}
+              onClick={() => setFilter(protein)}
+            >
+              {protein}
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
+        Showing <span className="tabular">{filteredDishes.length}</span> of {(dishes || []).length} dishes
+      </p>
+
+      {/* -------------------------------------------------- Post-add rating */}
+      {justAdded && (
+        <div className="card animate-fade-in-up" style={{
+          marginBottom: 'var(--space-5)',
+          borderColor: 'var(--accent-border)',
+          background: 'var(--accent-softer)',
+        }}>
+          <p style={{ margin: '0 0 var(--space-3)', fontSize: 'var(--text-sm)' }}>
+            <strong>{justAdded.name}</strong> added. How does your family feel about it?
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary btn--sm" onClick={() => rateForEveryone(PREF.LOVES)}>
+              <Icon name="heart" size={15} /> Loves
+            </button>
+            <button type="button" className="btn btn-secondary btn--sm" onClick={() => rateForEveryone(PREF.EATS)}>
+              <Icon name="thumbUp" size={15} /> Eats
+            </button>
+            <button type="button" className="btn btn-secondary btn--sm" onClick={() => rateForEveryone(PREF.WONT_TOUCH)}>
+              <Icon name="ban" size={15} /> Won&rsquo;t
+            </button>
+            <button type="button" className="btn btn-ghost btn--sm" onClick={() => setJustAdded(null)}>
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------------------------------------------- Dish grid */}
+      {filteredDishes.length === 0 ? (
+        <div className="empty-state">
+          <Icon name="search" size={28} style={{ color: 'var(--text-muted)' }} />
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>No dishes match that search.</p>
+          <button type="button" className="btn btn-primary" onClick={openAdd}>
+            <Icon name="plus" size={17} /> Add a recipe
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--space-3)' }}>
+          {filteredDishes.map((dish) => (
+            <article
+              key={dish.id}
+              id={`dish-card-${dish.id}`}
+              className="card"
+              style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
+            >
+              <div>
+                <h3 style={{
+                  margin: '0 0 2px', fontFamily: 'var(--font-heading)',
+                  fontSize: 'var(--text-md)', fontWeight: 'var(--weight-semibold)', color: 'var(--text-primary)',
+                }}>
+                  {dish.nameEn}
+                </h3>
+                {dish.nameUr && (
+                  <p lang="ur" dir="rtl" style={{
+                    margin: 0, fontFamily: 'var(--font-urdu)',
+                    fontSize: 'var(--text-sm)', color: 'var(--accent)', lineHeight: 2,
+                  }}>
+                    {dish.nameUr}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 'auto' }}>
+                <span className={`tag-pill tag-pill--${dish.proteinType?.toLowerCase()}`} style={{ fontSize: 'var(--text-2xs)' }}>
+                  {dish.proteinType}
+                </span>
+                <span className="tag-pill" style={{ fontSize: 'var(--text-2xs)' }}>{dish.dishType}</span>
+              </div>
+
+              {dish.isCustom && (
+                <div style={{ display: 'flex', gap: 'var(--space-1)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)' }}>
+                  <button type="button" id={`btn-edit-dish-${dish.id}`} className="btn btn-ghost btn--sm" onClick={() => openEdit(dish)}>
+                    <Icon name="edit" size={14} /> Edit
+                  </button>
+                  <button
+                    type="button"
+                    id={`btn-delete-dish-${dish.id}`}
+                    className="btn btn-ghost btn--sm"
+                    onClick={() => handleDelete(dish)}
+                    style={{ color: 'var(--danger)' }}
+                  >
+                    <Icon name="trash" size={14} /> Delete
+                  </button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+
+      <button type="button" id="fab-add-dish" className="fab" aria-label="Add a recipe" onClick={openAdd}>
+        <Icon name="plus" size={26} strokeWidth={2.4} />
       </button>
 
       {isModalOpen && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent} className="card-elevated animate-fade-in-up">
-            <h2 style={{ fontFamily: 'var(--font-heading)', color: 'var(--color-primary)', marginBottom: '16px' }}>Add New Dish</h2>
-            <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              
-              <div>
-                <label htmlFor="new-dish-name-en" style={styles.label}>Name (English)</label>
-                <input id="new-dish-name-en" type="text" className="input" required style={{ width: '100%' }}
-                  value={newDish.nameEn} onChange={e => setNewDish({...newDish, nameEn: e.target.value})} />
-              </div>
+        <Modal
+          title={editingId != null ? 'Edit dish' : 'Add a dish'}
+          titleId="dish-modal-title"
+          onClose={() => setIsModalOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" form="dish-form" id="btn-submit-add" className="btn btn-primary" style={{ flex: 1 }}>
+                {editingId != null ? 'Save changes' : 'Add dish'}
+              </button>
+            </>
+          )}
+        >
+          <form id="dish-form" onSubmit={handleSubmit} style={{ display: 'grid', gap: 'var(--space-4)' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" htmlFor="new-dish-name-en">Name (English)</label>
+              <input
+                id="new-dish-name-en"
+                type="text"
+                className="input"
+                required
+                placeholder="e.g. Aloo Gosht"
+                value={draft.nameEn}
+                onChange={(event) => setDraft({ ...draft, nameEn: event.target.value })}
+              />
+            </div>
 
-              <div>
-                <label htmlFor="new-dish-name-ur" style={styles.label}>Name (Urdu)</label>
-                <input id="new-dish-name-ur" type="text" className="input" style={{ width: '100%', fontFamily: "'Noto Nastaliq Urdu', serif", direction: 'rtl' }}
-                  value={newDish.nameUr} onChange={e => setNewDish({...newDish, nameUr: e.target.value})} />
-              </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" htmlFor="new-dish-name-ur">Name (Urdu)</label>
+              <input
+                id="new-dish-name-ur"
+                type="text"
+                lang="ur"
+                dir="rtl"
+                className="input"
+                placeholder="آلو گوشت"
+                style={{ fontFamily: 'var(--font-urdu)' }}
+                value={draft.nameUr}
+                onChange={(event) => setDraft({ ...draft, nameUr: event.target.value })}
+              />
+              <span className="form-hint">Optional, but it is what most of the family will read.</span>
+            </div>
 
-              <div>
-                <label htmlFor="new-dish-protein" style={styles.label}>Protein Type</label>
-                <select id="new-dish-protein" className="input" style={{ width: '100%' }}
-                  value={newDish.proteinType} onChange={e => setNewDish({...newDish, proteinType: e.target.value})}>
-                  {proteins.filter(p => p !== 'All').map(p => <option key={p} value={p.toLowerCase()}>{p}</option>)}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="new-dish-protein">Protein</label>
+                <select
+                  id="new-dish-protein"
+                  className="select"
+                  value={draft.proteinType}
+                  onChange={(event) => setDraft({ ...draft, proteinType: event.target.value })}
+                >
+                  {PROTEIN_VALUES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
 
-              <div>
-                <label htmlFor="new-dish-type" style={styles.label}>Dish Type</label>
-                <select id="new-dish-type" className="input" style={{ width: '100%' }}
-                  value={newDish.dishType} onChange={e => setNewDish({...newDish, dishType: e.target.value})}>
-                  {dishTypes.map(t => <option key={t} value={t}>{t}</option>)}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="new-dish-type">Type</label>
+                <select
+                  id="new-dish-type"
+                  className="select"
+                  value={draft.dishType}
+                  onChange={(event) => setDraft({ ...draft, dishType: event.target.value })}
+                >
+                  {DISH_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
+            </div>
 
-              <div>
-                <label htmlFor="new-dish-cuisine" style={styles.label}>Cuisine Type</label>
-                <select id="new-dish-cuisine" className="input" style={{ width: '100%' }}
-                  value={newDish.cuisineType} onChange={e => setNewDish({...newDish, cuisineType: e.target.value})}>
-                  {cuisineTypes.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" htmlFor="new-dish-cuisine">Cuisine</label>
+              <select
+                id="new-dish-cuisine"
+                className="select"
+                value={draft.cuisineType}
+                onChange={(event) => setDraft({ ...draft, cuisineType: event.target.value })}
+              >
+                {CUISINE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
 
-              <div>
-                <label style={styles.label}>Dietary Tags</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {dietaryOptions.map(tag => (
-                    <label key={tag} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', color: 'var(--color-text)' }}>
-                      <input id={`tag-${tag}`} type="checkbox" checked={newDish.dietaryTags.includes(tag)}
-                        onChange={() => handleTagChange(tag)} />
-                      {tag}
-                    </label>
-                  ))}
-                </div>
+            <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+              <legend className="form-label" style={{ marginBottom: 'var(--space-2)', padding: 0 }}>
+                Dietary tags
+              </legend>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1) var(--space-3)' }}>
+                {DIETARY_OPTIONS.map((tag) => (
+                  <Checkbox
+                    key={tag}
+                    id={`tag-${tag}`}
+                    label={tag}
+                    checked={draft.dietaryTags.includes(tag)}
+                    onChange={() => toggleTag(tag)}
+                  />
+                ))}
               </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-                <button type="button" id="btn-cancel-add" className="btn-secondary" style={{ flex: 1 }} onClick={() => setIsModalOpen(false)}>Cancel</button>
-                <button type="submit" id="btn-submit-add" className="btn-primary" style={{ flex: 1 }}>Save Dish</button>
-              </div>
-            </form>
-          </div>
-        </div>
+            </fieldset>
+          </form>
+        </Modal>
       )}
     </>
   );
 };
 
-const styles = {
-  filterContainer: {
-    display: 'flex',
-    gap: '8px',
-    overflowX: 'auto',
-    paddingBottom: '12px',
-    marginBottom: '12px',
-    scrollbarWidth: 'none',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-  },
-  recipeCard: {
-    padding: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: '100px'
-  },
-  fab: {
-    position: 'fixed',
-    bottom: '100px',
-    right: '24px',
-    width: '64px',
-    height: '64px',
-    borderRadius: '28px',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    fontSize: '24px',
-    boxShadow: '0 4px 12px var(--shadow-color, rgba(231, 111, 81, 0.4))',
-    zIndex: 100,
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    padding: '16px'
-  },
-  modalContent: {
-    width: '100%',
-    maxWidth: '400px',
-    maxHeight: '90vh',
-    overflowY: 'auto',
-    padding: '24px'
-  },
-  label: {
-    display: 'block',
-    marginBottom: '4px',
-    fontSize: '14px',
-    color: 'var(--color-text-secondary)',
-    fontFamily: 'var(--font-body)'
-  }
-};
+export default RecipesPage;

@@ -1,155 +1,177 @@
 import React, { useState } from 'react';
 import { useDishes, useFamilyMembers } from '../../hooks/useDatabase';
-import { updateFamilyMember } from '../../data/db';
+import { setMemberPreference } from '../../data/db';
+import { PREF } from '../../utils/preferences';
+import { Icon, HeartIcon } from '../ui/Icon';
+import { WizardStep, Callout } from './OnboardingProgress';
 
+/**
+ * Rate the first dishes, for everyone at once.
+ *
+ * The escape hatches are given real prominence here: 30 consecutive cards is the
+ * single biggest drop-off risk in onboarding, so "skip" is a first-class action
+ * rather than a low-contrast link below the fold.
+ */
 const RatingStep = ({ onComplete }) => {
   const { dishes = [], loading: dishesLoading } = useDishes();
-  const { familyMembers = [], loading: familyLoading } = useFamilyMembers();
-  
+  const { members: familyMembers = [], loading: familyLoading } = useFamilyMembers();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [lastChoice, setLastChoice] = useState(null);
 
   const displayDishes = dishes.slice(0, 30);
   const total = displayDishes.length;
 
-  const handleRate = async (preference) => {
-    if (displayDishes.length === 0) return;
-    
-    const dish = displayDishes[currentIndex];
-    
-    for (const member of familyMembers) {
-      const newPrefs = { ...member.preferences, [dish.id]: preference };
-      await updateFamilyMember(member.id, { preferences: newPrefs });
-    }
-
-    nextDish();
-  };
-
-  const nextDish = () => {
+  const advance = () => {
     if (currentIndex < total - 1) {
-      setCurrentIndex(prev => prev + 1);
+      setCurrentIndex((prev) => prev + 1);
+      setLastChoice(null);
     } else {
       onComplete();
     }
   };
 
-  if (dishesLoading || familyLoading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem', color: 'var(--color-text-secondary)' }}>Loading...</div>;
-  }
+  const handleRate = async (preference) => {
+    if (total === 0) return;
+    const dish = displayDishes[currentIndex];
 
-  if (total === 0) {
+    // Read-modify-write per member from the database rather than from the rendered
+    // snapshot, so rapid taps cannot clobber each other's preference maps.
+    for (const member of familyMembers) {
+      await setMemberPreference(member.id, dish.id, preference);
+    }
+
+    setLastChoice(preference);
+    advance();
+  };
+
+  if (dishesLoading || familyLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem' }}>
-        <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>No dishes found.</p>
-        <button className="btn btn-primary" onClick={onComplete}>Continue</button>
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <div className="skeleton" style={{ height: 180, borderRadius: 'var(--radius-xl)' }} />
+        <div className="skeleton" style={{ height: 120, borderRadius: 'var(--radius-lg)' }} />
       </div>
     );
   }
 
+  if (total === 0) {
+    return (
+      <WizardStep
+        title="No dishes found"
+        description="The recipe library appears to be empty."
+        actions={<button type="button" className="btn btn-primary btn--lg btn--block" onClick={onComplete}>Continue</button>}
+      >
+        <Callout icon="warning" tone="warning">
+          Try refreshing the built-in recipes from Settings after setup.
+        </Callout>
+      </WizardStep>
+    );
+  }
+
   const currentDish = displayDishes[currentIndex];
-  const progressPercent = ((currentIndex) / total) * 100;
+  const progress = ((currentIndex + 1) / total) * 100;
+
+  const CHOICES = [
+    { value: PREF.LOVES, label: 'Loves it', hint: 'Suggest often', icon: 'heart', tone: 'var(--danger)' },
+    { value: PREF.EATS, label: 'Eats it', hint: 'Fine with it', icon: 'thumbUp', tone: 'var(--success)' },
+    { value: PREF.WONT_TOUCH, label: 'Won’t eat', hint: 'Never suggest', icon: 'ban', tone: 'var(--text-secondary)' },
+  ];
 
   return (
-    <div className="animate-fade-in" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '2rem',
-      maxWidth: '500px',
-      margin: '0 auto',
-      minHeight: '100vh',
-      textAlign: 'center'
-    }}>
-      <h2 style={{
-        fontFamily: 'var(--font-heading)',
-        fontSize: '1.75rem',
-        color: 'var(--color-text-primary)',
-        marginBottom: '1.5rem',
-        lineHeight: 1.3
-      }}>
-        How does your family feel about these dishes?
-      </h2>
-
-      <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.1)', height: '8px', borderRadius: '4px', marginBottom: '0.5rem', overflow: 'hidden' }}>
-        <div style={{ height: '100%', background: 'var(--color-primary)', width: `${progressPercent}%`, transition: 'width 0.3s ease' }}></div>
-      </div>
-      <div style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', marginBottom: '2rem' }}>
-        {currentIndex + 1} / {total}
+    <WizardStep
+      title="Their tastes"
+      description={`${total} quick taps. Rate what you know — unsure dishes can be skipped.`}
+    >
+      {/* Card position indicator */}
+      <div className="row-between" style={{ marginBottom: 'var(--space-3)' }}>
+        <span className="tabular" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+          {currentIndex + 1} of {total}
+        </span>
+        <button
+          type="button"
+          className="btn btn-ghost btn--sm"
+          onClick={onComplete}
+        >
+          Skip the rest
+        </button>
       </div>
 
-      <div className="card-elevated animate-fade-in-up" key={currentDish.id} style={{
-        background: 'var(--color-bg-elevated)',
-        padding: '3rem 2rem',
-        borderRadius: 'var(--radius-xl)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '1rem',
-        marginBottom: '2rem',
-        border: '1px solid rgba(255,255,255,0.05)'
-      }}>
-        <h3 style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--color-text-primary)', margin: 0 }}>
+      <div className="stat-bar" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="stat-bar__fill" style={{ width: `${progress}%` }} />
+      </div>
+
+      {/* The dish under consideration */}
+      <div
+        key={currentDish.id}
+        className="card-elevated animate-fade-in-up"
+        style={{ textAlign: 'center', padding: 'var(--space-8) var(--space-5)', marginBottom: 'var(--space-5)' }}
+      >
+        <h3 style={{
+          margin: 0,
+          fontFamily: 'var(--font-heading)',
+          fontSize: 'var(--text-2xl)',
+          fontWeight: 'var(--weight-bold)',
+          letterSpacing: '-0.02em',
+        }}>
           {currentDish.nameEn}
         </h3>
         {currentDish.nameUr && (
-          <p style={{ 
-            fontFamily: "'Noto Nastaliq Urdu', serif", 
-            fontSize: '2rem', 
-            color: 'var(--color-accent)',
-            margin: '0.5rem 0'
+          <p lang="ur" dir="rtl" style={{
+            margin: 'var(--space-2) 0 0',
+            fontFamily: 'var(--font-urdu)',
+            fontSize: 'var(--text-xl)',
+            color: 'var(--accent)',
+            lineHeight: 2,
           }}>
             {currentDish.nameUr}
           </p>
         )}
-        
         {currentDish.proteinType && (
-          <div className="tag-pill" style={{ 
-            background: 'var(--color-primary-dark)', 
-            color: 'var(--color-text-primary)',
-            padding: '0.25rem 1rem',
-            borderRadius: '999px',
-            fontSize: '0.9rem',
-            marginTop: '1rem'
-          }}>
+          <span className={`tag-pill tag-pill--${currentDish.proteinType}`} style={{ marginTop: 'var(--space-4)' }}>
             {currentDish.proteinType}
-          </div>
+          </span>
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-        <button 
-          className="btn card"
-          onClick={() => handleRate('loves')}
-          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem 0.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.1)' }}
-        >
-          <span style={{ fontSize: '2rem' }}>❤️</span>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>Loves it</span>
-        </button>
-        <button 
-          className="btn card"
-          onClick={() => handleRate('eats')}
-          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem 0.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.1)' }}
-        >
-          <span style={{ fontSize: '2rem' }}>👍</span>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>Eats it</span>
-        </button>
-        <button 
-          className="btn card"
-          onClick={() => handleRate('wont_eat')}
-          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem 0.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.1)' }}
-        >
-          <span style={{ fontSize: '2rem' }}>🚫</span>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>Won't eat</span>
-        </button>
+      {/* The three choices */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
+        {CHOICES.map((choice) => {
+          const isActive = lastChoice === choice.value;
+          return (
+            <button
+              key={choice.value}
+              type="button"
+              className="card card--interactive"
+              onClick={() => handleRate(choice.value)}
+              aria-label={`${choice.label} — for everyone`}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 'var(--space-2)', padding: 'var(--space-4) var(--space-2)',
+                borderColor: isActive ? 'var(--accent)' : undefined,
+              }}
+            >
+              <span style={{
+                display: 'grid', placeItems: 'center', width: 44, height: 44,
+                borderRadius: 'var(--radius-full)', background: 'var(--fill-soft)', color: choice.tone,
+              }}>
+                {choice.icon === 'heart'
+                  ? <HeartIcon size={22} filled={isActive} />
+                  : <Icon name={choice.icon} size={22} />}
+              </span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--text-primary)' }}>
+                {choice.label}
+              </span>
+              <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-muted)' }}>{choice.hint}</span>
+            </button>
+          );
+        })}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <button className="btn btn-ghost" onClick={() => handleRate('eats')} style={{ color: 'var(--color-text-secondary)' }}>
-          Skip (Defaults to Eats)
-        </button>
-        <button className="btn btn-ghost" onClick={onComplete} style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-          Skip All Remaining
-        </button>
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <Callout icon="info">
+          Applies to everyone for now. Set individual preferences per person later under Family.
+        </Callout>
       </div>
-    </div>
+    </WizardStep>
   );
 };
 

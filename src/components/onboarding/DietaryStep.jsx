@@ -1,136 +1,166 @@
 import React, { useState } from 'react';
 import { addDietaryRule } from '../../data/db';
+import { DIETARY_RULE_TYPES, RULE_CATEGORIES } from '../../utils/preferences';
+import { Icon } from '../ui/Icon';
+import { Switch, Stepper } from '../ui/Controls';
+import { WizardStep, Callout } from './OnboardingProgress';
+
+/**
+ * Optional dietary constraints.
+ *
+ * Each rule is a switch plus a stepper, rather than a checkbox with a bare range
+ * input: the previous range had no visible value, no tick marks, and a hit area
+ * about 2px tall on some Android builds.
+ */
+const RULE_PRESETS = [
+  {
+    key: 'beef',
+    title: 'Limit red meat',
+    description: 'Cap how often beef or mutton is suggested in a week',
+    category: RULE_CATEGORIES.PROTEIN_TYPE,
+    value: 'beef',
+    ruleType: DIETARY_RULE_TYPES.MAX_PER_WEEK,
+    defaultLimit: 2,
+    min: 1,
+    max: 7,
+    unit: 'times a week',
+  },
+  {
+    key: 'fried',
+    title: 'Limit fried food',
+    description: 'Keep deep-fried dishes to a set number per week',
+    category: RULE_CATEGORIES.DISH_TYPE,
+    value: 'fried',
+    ruleType: DIETARY_RULE_TYPES.MAX_PER_WEEK,
+    defaultLimit: 2,
+    min: 1,
+    max: 7,
+    unit: 'times a week',
+  },
+  {
+    key: 'veg',
+    title: 'Guarantee vegetables',
+    description: 'Make sure vegetable or lentil dishes appear each week',
+    category: RULE_CATEGORIES.PROTEIN_TYPE,
+    value: 'vegetables',
+    ruleType: DIETARY_RULE_TYPES.MIN_PER_WEEK,
+    defaultLimit: 2,
+    min: 1,
+    max: 7,
+    unit: 'times a week',
+  },
+  {
+    key: 'fat',
+    title: 'No heavy days in a row',
+    description: 'Never suggest a high-fat dish two days running',
+    category: RULE_CATEGORIES.DIETARY_TAGS,
+    value: 'high-fat',
+    ruleType: DIETARY_RULE_TYPES.NO_CONSECUTIVE,
+    defaultLimit: 1,
+    min: 1,
+    max: 1,
+    unit: '',
+  },
+];
 
 const DietaryStep = ({ onComplete }) => {
-  const [beefRule, setBeefRule] = useState({ active: false, limit: 2 });
-  const [friedRule, setFriedRule] = useState({ active: false, limit: 3 });
-  const [veggieRule, setVeggieRule] = useState({ active: false, limit: 2 });
-  const [fatRule, setFatRule] = useState({ active: false });
+  const [state, setState] = useState(() => RULE_PRESETS.reduce((acc, preset) => {
+    acc[preset.key] = { active: false, limit: preset.defaultLimit };
+    return acc;
+  }, {}));
+
+  const toggle = (key, active) => setState((prev) => ({ ...prev, [key]: { ...prev[key], active } }));
+  const setLimit = (key, limit) => setState((prev) => ({ ...prev, [key]: { ...prev[key], limit } }));
 
   const handleComplete = async () => {
-    const activeRules = [];
-    if (beefRule.active) {
-      activeRules.push({ ruleType: 'max_per_week', category: 'proteinType', value: 'beef', limit: beefRule.limit, isActive: true });
-    }
-    if (friedRule.active) {
-      activeRules.push({ ruleType: 'max_per_week', category: 'dishType', value: 'fried', limit: friedRule.limit, isActive: true });
-    }
-    if (veggieRule.active) {
-      activeRules.push({ ruleType: 'min_per_week', category: 'proteinType', value: 'vegetables', limit: veggieRule.limit, isActive: true });
-    }
-    if (fatRule.active) {
-      activeRules.push({ ruleType: 'no_consecutive', category: 'dietaryTags', value: 'high-fat', limit: 1, isActive: true });
-    }
+    const rules = RULE_PRESETS
+      .filter((preset) => state[preset.key].active)
+      .map((preset) => ({
+        ruleType: preset.ruleType,
+        category: preset.category,
+        value: preset.value,
+        limit: preset.ruleType === DIETARY_RULE_TYPES.NO_CONSECUTIVE ? 1 : state[preset.key].limit,
+        isActive: true,
+      }));
 
-    for (const rule of activeRules) {
+    for (const rule of rules) {
       await addDietaryRule(rule);
     }
-
     onComplete();
   };
 
+  const activeCount = RULE_PRESETS.filter((preset) => state[preset.key].active).length;
+
   return (
-    <div className="animate-fade-in" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '2rem',
-      maxWidth: '600px',
-      margin: '0 auto',
-      minHeight: '100%'
-    }}>
-      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <h2 style={{
-          fontFamily: 'var(--font-heading)',
-          fontSize: '2rem',
-          color: 'var(--color-primary)',
-          marginBottom: '0.5rem'
-        }}>
-          Set your dietary preferences
-        </h2>
-        <p style={{ color: 'var(--color-text-secondary)', fontSize: '1.1rem' }}>
-          Control what gets suggested
-        </p>
+    <WizardStep
+      title="Any dietary rules?"
+      description="Optional. These are hard limits the planner will always respect."
+      actions={(
+        <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+          <button type="button" className="btn btn-primary btn--lg btn--block" onClick={handleComplete}>
+            {activeCount > 0 ? `Finish with ${activeCount} rule${activeCount > 1 ? 's' : ''}` : 'Finish setup'}
+            <Icon name="check" size={18} />
+          </button>
+          <button type="button" className="btn btn-ghost btn--block" onClick={onComplete}>
+            Skip this step
+          </button>
+        </div>
+      )}
+    >
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+        {RULE_PRESETS.map((preset) => {
+          const isOn = state[preset.key].active;
+          return (
+            <div
+              key={preset.key}
+              className="card"
+              style={{
+                padding: 'var(--space-4)',
+                borderColor: isOn ? 'var(--accent-border)' : undefined,
+                background: isOn ? 'var(--accent-softer)' : undefined,
+              }}
+            >
+              <Switch
+                id={`rule-${preset.key}`}
+                checked={isOn}
+                onChange={(checked) => toggle(preset.key, checked)}
+                label={preset.title}
+              />
+              <p style={{
+                margin: 'var(--space-1) 0 0 65px',
+                fontSize: 'var(--text-xs)',
+                color: 'var(--text-muted)',
+                lineHeight: 'var(--leading-snug)',
+              }}>
+                {preset.description}
+              </p>
+
+              {/* The stepper only appears once the rule is enabled, so the step does
+                  not present nine controls at once. */}
+              {isOn && preset.ruleType !== DIETARY_RULE_TYPES.NO_CONSECUTIVE && (
+                <div style={{ marginTop: 'var(--space-4)' }}>
+                  <Stepper
+                    id={`rule-${preset.key}-limit`}
+                    label="How often"
+                    unit={preset.unit}
+                    value={state[preset.key].limit}
+                    min={preset.min}
+                    max={preset.max}
+                    onChange={(limit) => setLimit(preset.key, limit)}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '3rem' }}>
-        
-        {/* Beef Rule */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-primary)', fontSize: '1.1rem', fontWeight: 500 }}>Limit beef to X times per week</span>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={beefRule.active} onChange={(e) => setBeefRule({ ...beefRule, active: e.target.checked })} style={{ width: '1.2rem', height: '1.2rem', accentColor: 'var(--color-primary)' }} />
-            </label>
-          </div>
-          {beefRule.active && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              <input type="range" min="1" max="7" value={beefRule.limit} onChange={(e) => setBeefRule({ ...beefRule, limit: parseInt(e.target.value) })} style={{ flex: 1, accentColor: 'var(--color-primary)' }} />
-              <span style={{ color: 'var(--color-text-secondary)', width: '60px', textAlign: 'right' }}>{beefRule.limit} times</span>
-            </div>
-          )}
-        </div>
-
-        {/* Fried Food Rule */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-primary)', fontSize: '1.1rem', fontWeight: 500 }}>Limit fried food to X times per week</span>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={friedRule.active} onChange={(e) => setFriedRule({ ...friedRule, active: e.target.checked })} style={{ width: '1.2rem', height: '1.2rem', accentColor: 'var(--color-primary)' }} />
-            </label>
-          </div>
-          {friedRule.active && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              <input type="range" min="1" max="7" value={friedRule.limit} onChange={(e) => setFriedRule({ ...friedRule, limit: parseInt(e.target.value) })} style={{ flex: 1, accentColor: 'var(--color-primary)' }} />
-              <span style={{ color: 'var(--color-text-secondary)', width: '60px', textAlign: 'right' }}>{friedRule.limit} times</span>
-            </div>
-          )}
-        </div>
-
-        {/* Veggie Rule */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-primary)', fontSize: '1.1rem', fontWeight: 500 }}>Include at least X vegetable/lentil days per week</span>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={veggieRule.active} onChange={(e) => setVeggieRule({ ...veggieRule, active: e.target.checked })} style={{ width: '1.2rem', height: '1.2rem', accentColor: 'var(--color-primary)' }} />
-            </label>
-          </div>
-          {veggieRule.active && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              <input type="range" min="1" max="7" value={veggieRule.limit} onChange={(e) => setVeggieRule({ ...veggieRule, limit: parseInt(e.target.value) })} style={{ flex: 1, accentColor: 'var(--color-primary)' }} />
-              <span style={{ color: 'var(--color-text-secondary)', width: '60px', textAlign: 'right' }}>{veggieRule.limit} times</span>
-            </div>
-          )}
-        </div>
-
-        {/* Fat Rule */}
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--color-bg-card)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--color-text-primary)', fontSize: '1.1rem', fontWeight: 500 }}>No high-fat meals on consecutive days</span>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={fatRule.active} onChange={(e) => setFatRule({ ...fatRule, active: e.target.checked })} style={{ width: '1.2rem', height: '1.2rem', accentColor: 'var(--color-primary)' }} />
-            </label>
-          </div>
-        </div>
-
+      <div style={{ marginTop: 'var(--space-5)' }}>
+        <Callout icon="info">
+          You can add, remove or change any of these later in Settings.
+        </Callout>
       </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: 'auto' }}>
-        <button 
-          className="btn btn-primary"
-          onClick={handleComplete}
-          style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', borderRadius: 'var(--radius-xl)' }}
-        >
-          Complete Setup
-        </button>
-        <button 
-          className="btn btn-ghost"
-          onClick={onComplete}
-          style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}
-        >
-          Skip this step
-        </button>
-      </div>
-    </div>
+    </WizardStep>
   );
 };
 

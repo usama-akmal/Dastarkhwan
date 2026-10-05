@@ -1,5 +1,21 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, addDish, updateDish, deleteDish, addFamilyMember, updateFamilyMember, deleteFamilyMember, addCookingHistoryEntry, deleteCookingHistoryEntry, addDietaryRule, updateDietaryRule, deleteDietaryRule, updateSettings } from '../data/db';
+import {
+  db,
+  addDish,
+  updateDish,
+  deleteDish,
+  addFamilyMember,
+  updateFamilyMember,
+  deleteFamilyMember,
+  setMemberPreference,
+  addCookingHistoryEntry,
+  updateCookingHistoryEntry,
+  deleteCookingHistoryEntry,
+  addDietaryRule,
+  updateDietaryRule,
+  deleteDietaryRule,
+  updateSettings,
+} from '../data/db';
 
 export const useDishes = () => {
   const dishes = useLiveQuery(() => db.dishes.toArray());
@@ -20,11 +36,17 @@ export const useFamilyMembers = () => {
   const loading = members === undefined;
 
   return {
+    // NOTE: this key is `members`. It was previously destructured as `familyMembers`
+    // in the onboarding steps, which silently yielded `[]` and made the whole wizard
+    // a no-op. `familyMembers` is provided as an alias so neither spelling can
+    // silently break the flow again.
     members: members || [],
+    familyMembers: members || [],
     loading,
     addMember: addFamilyMember,
     updateMember: updateFamilyMember,
     deleteMember: deleteFamilyMember,
+    setPreference: setMemberPreference,
     refreshMembers: () => {}
   };
 };
@@ -46,6 +68,7 @@ export const useCookingHistory = (startDate, endDate) => {
     history: history || [],
     loading,
     addEntry: addCookingHistoryEntry,
+    updateEntry: updateCookingHistoryEntry,
     deleteEntry: deleteCookingHistoryEntry,
     refreshHistory: () => {}
   };

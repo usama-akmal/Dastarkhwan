@@ -32,7 +32,15 @@ jobs:
           
       - name: Install dependencies
         run: npm ci
-        
+
+      # Re-run the gates here so a deploy can never ship something the verify
+      # workflow would have rejected (e.g. a direct push that skipped PR checks).
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
         

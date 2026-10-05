@@ -8,11 +8,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['vite.svg'],
+      includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
+        id: '/Dastarkhwan/',
         name: 'Dastarkhwan — Meal Planner',
         short_name: 'Dastarkhwan',
-        description: 'Your daily Pakistani meal planning companion',
+        description: 'Daily Pakistani meal planning from your family\'s preferences, cooking history and dietary rules. Works offline.',
         theme_color: '#161a23',
         background_color: '#161a23',
         display: 'standalone',
@@ -21,56 +22,35 @@ export default defineConfig({
         start_url: '/Dastarkhwan/',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            // Real PNG at the declared size. The previous icons were 1024x1024 JPEGs
+            // named .png and declared 192/512, which is what Chrome validates against.
+            src: 'icon-192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
           },
           {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          },
-          {
-            src: 'pwa-512x512.png',
+            src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
-          }
-        ]
+          },
+          {
+            src: 'icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
-      }
+        // The app shell must be available offline immediately after install.
+        navigateFallback: '/Dastarkhwan/index.html',
+        cleanupOutdatedCaches: true,
+        // No runtimeCaching for fonts any more: fonts are self-hosted from src/fonts,
+        // so they are fingerprinted and precached like any other app asset. That is
+        // what makes the offline-first claim hold on the very first launch, with no
+        // request to a third-party CDN at any point.
+      },
     })
   ],
 })

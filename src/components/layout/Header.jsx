@@ -1,73 +1,42 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Icon } from '../ui/Icon';
+
+const TITLES = {
+  '/': { title: 'Dastarkhwan', subtitle: 'دسترخوان' },
+  '/calendar': { title: 'Calendar' },
+  '/recipes': { title: 'Recipes' },
+  '/family': { title: 'Family' },
+  '/settings': { title: 'Settings' },
+};
 
 export const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  
-  const getPageTitle = () => {
-    switch(location.pathname) {
-      case '/': return 'Dastarkhwan';
-      case '/calendar': return 'Calendar';
-      case '/recipes': return 'Recipes';
-      case '/family': return 'Family Profiles';
-      case '/settings': return 'Settings';
-      default: return 'Dastarkhwan';
-    }
-  };
+  const { title, subtitle } = TITLES[location.pathname] || TITLES['/'];
+  const isHome = location.pathname === '/';
 
   return (
-    <header className="header" style={styles.header}>
-      {location.pathname !== '/' && (
-        <button className="btn-icon" onClick={() => navigate(-1)} style={styles.backButton}>
-          ←
+    <header className="app-header">
+      {!isHome && (
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => navigate(-1)}
+          aria-label="Go back"
+        >
+          <Icon name="arrowLeft" size={20} />
         </button>
       )}
-      <div style={styles.titleContainer}>
-        <h1 style={styles.titleEn}>{getPageTitle()}</h1>
-        {getPageTitle() === 'Dastarkhwan' && (
-          <span style={styles.titleUr}>دسترخوان</span>
-        )}
+
+      <div className="app-header__titles">
+        <h1 className="app-header__title">{title}</h1>
+        {subtitle && <span className="app-header__subtitle" lang="ur" dir="rtl">{subtitle}</span>}
       </div>
+
+      <div className="app-header__spacer" />
     </header>
   );
 };
 
-const styles = {
-  header: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '60px',
-    backgroundColor: 'rgba(25, 25, 25, 0.8)',
-    backdropFilter: 'blur(10px)',
-    display: 'flex',
-    alignItems: 'center',
-    padding: '0 16px',
-    zIndex: 100,
-    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-  },
-  backButton: {
-    marginRight: '12px',
-    color: '#F4A261',
-  },
-  titleContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  titleEn: {
-    fontFamily: "'Outfit', sans-serif",
-    color: '#F4A261',
-    fontSize: '20px',
-    margin: 0,
-  },
-  titleUr: {
-    fontFamily: "'Noto Nastaliq Urdu', serif",
-    color: '#E76F51',
-    fontSize: '14px',
-    margin: 0,
-    direction: 'rtl',
-  }
-};
+export default Header;

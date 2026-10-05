@@ -1,11 +1,46 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#161a23" />
-    <meta name="description" content="Dastarkhwan — Your daily Pakistani meal planning companion. Smart suggestions based on family preferences, cooking history, and dietary rules." />
+    <!--
+      No `dir` on <html>: the interface language is English (LTR) with Urdu dish names
+      embedded right-to-left inside it, and each of those carries its own dir="rtl" +
+      lang="ur". A document-level direction contradicted that per-string markup.
+      `maximum-scale`/`user-scalable=no` was removed because it blocked pinch-zoom
+      (WCAG 1.4.4); this is a normal scrolling document, not a canvas.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!--
+      Applied before first paint to avoid a flash of the wrong theme. `theme-color`
+      must already exist for the script to update it, so both live here in the head
+      before any stylesheet or module is requested. Kept inline and dependency-free.
+    -->
+    <meta name="theme-color" content="#100E0C" />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('dastarkhwan:theme');
+          var mode = stored === 'dark' || stored === 'light' ? stored : 'system';
+          var dark = mode === 'dark' ||
+            (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#100E0C' : '#F8F3EC');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <!--
+      Fonts are self-hosted from public/fonts and referenced by src/styles/fonts.css.
+      The app makes no third-party font request at all, so the typography works offline
+      and no visitor IP is disclosed to a CDN.
+    -->
+    <meta name="description" content="Dastarkhwan — daily Pakistani meal planning. Suggests what to cook from your family's preferences, your cooking history and your dietary rules. Works offline; your data stays on your device." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Dastarkhwan" />

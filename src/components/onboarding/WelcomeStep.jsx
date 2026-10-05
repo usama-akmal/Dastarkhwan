@@ -1,88 +1,84 @@
 import React from 'react';
+import { Icon } from '../ui/Icon';
 
-const WelcomeStep = ({ onNext }) => {
-  return (
-    <div className="animate-fade-in" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100%',
-      padding: '2rem',
-      textAlign: 'center',
-      color: 'var(--color-text-primary)'
-    }}>
-      <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <h1 className="animate-fade-in-up" style={{
-          fontFamily: 'var(--font-heading)',
-          fontSize: '3.5rem',
-          fontWeight: 700,
-          margin: 0,
-          background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-primary))',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          lineHeight: 1.1
-        }}>
-          Dastarkhwan
-        </h1>
-        <p className="animate-fade-in-up animate-stagger-1" style={{
-          fontFamily: "'Noto Nastaliq Urdu', serif",
-          fontSize: '2.5rem',
-          color: 'var(--color-accent)',
-          margin: '0.5rem 0'
-        }}>
-          دسترخوان
-        </p>
-        <p className="animate-fade-in-up animate-stagger-2" style={{
-          fontSize: '1.2rem',
-          color: 'var(--color-text-secondary)',
-          marginTop: '1rem',
-          marginBottom: '2rem'
-        }}>
-          Your daily meal planning companion
-        </p>
-      </div>
+const HIGHLIGHTS = [
+  { icon: 'pot', title: 'Never wonder what to cook', body: 'A suggestion for lunch and dinner, based on what you have been cooking lately.' },
+  { icon: 'family', title: 'Everyone gets a say', body: 'Mark what each person loves, eats, or will not touch — and the planner respects it.' },
+  { icon: 'filter', title: 'Your rules, enforced', body: 'Cap beef per week, keep vegetables in rotation, avoid the same protein twice running.' },
+];
 
-      <div className="card animate-fade-in-up animate-stagger-3" style={{
-        background: 'rgba(255, 255, 255, 0.05)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        padding: '2rem',
-        marginBottom: '3rem',
-        maxWidth: '400px',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-        textAlign: 'left'
+const WelcomeStep = ({ onNext }) => (
+  <div className="animate-fade-in" style={{
+    display: 'flex', flexDirection: 'column', justifyContent: 'center',
+    minHeight: '100%', padding: 'var(--space-6) var(--space-2)', textAlign: 'center',
+  }}>
+    <div style={{ marginBottom: 'var(--space-8)' }}>
+      <h1 style={{
+        margin: 0,
+        fontFamily: 'var(--font-heading)',
+        fontSize: 'var(--text-4xl)',
+        fontWeight: 'var(--weight-bold)',
+        letterSpacing: '-0.035em',
+        lineHeight: 1,
+        background: 'var(--gradient-primary)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '1.1rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>🍲</span>
-          <span>Plan Meals Effortlessly</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '1.1rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>👨‍👩‍👧‍👦</span>
-          <span>Track Family Preferences</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '1.1rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>⚖️</span>
-          <span>Balance Your Diet</span>
-        </div>
-      </div>
-
-      <button 
-        className="btn btn-primary animate-fade-in-up animate-stagger-4"
-        onClick={onNext}
-        style={{
-          fontSize: '1.2rem',
-          padding: '1rem 3rem',
-          borderRadius: 'var(--radius-xl)'
-        }}
-      >
-        Let's get started
-      </button>
+        Dastarkhwan
+      </h1>
+      <p lang="ur" dir="rtl" style={{
+        margin: 'var(--space-3) 0 0',
+        fontFamily: 'var(--font-urdu)',
+        fontSize: 'var(--text-2xl)',
+        color: 'var(--accent)',
+        lineHeight: 1.6,
+      }}>
+        دسترخوان
+      </p>
+      <p style={{
+        margin: 'var(--space-4) auto 0',
+        fontSize: 'var(--text-md)',
+        color: 'var(--text-secondary)',
+        maxWidth: '32ch',
+      }}>
+        Meal planning for Pakistani kitchens. Works offline, and your data never leaves your phone.
+      </p>
     </div>
-  );
-};
+
+    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 var(--space-8)', display: 'grid', gap: 'var(--space-3)', textAlign: 'left' }}>
+      {HIGHLIGHTS.map((item, index) => (
+        <li
+          key={item.title}
+          className={`card animate-fade-in-up animate-stagger-${index + 1}`}
+          style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'flex-start', padding: 'var(--space-4)' }}
+        >
+          <span style={{
+            display: 'grid', placeItems: 'center', flex: '0 0 auto',
+            width: 40, height: 40, borderRadius: 'var(--radius-sm)',
+            background: 'var(--accent-soft)', color: 'var(--accent)',
+          }}>
+            <Icon name={item.icon} size={20} />
+          </span>
+          <span>
+            <strong style={{ display: 'block', fontSize: 'var(--text-base)', marginBottom: 2 }}>{item.title}</strong>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 'var(--leading-snug)' }}>
+              {item.body}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
+
+    <button type="button" className="btn btn-primary btn--lg animate-fade-in-up animate-stagger-4" onClick={onNext}>
+      Get started
+      <Icon name="arrowRight" size={19} />
+    </button>
+
+    <p className="form-hint" style={{ marginTop: 'var(--space-4)' }}>
+      Takes about two minutes. You can change everything later.
+    </p>
+  </div>
+);
 
 export default WelcomeStep;
