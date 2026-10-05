@@ -23,12 +23,50 @@ describe('toLocalDateKey', () => {
     expect(toLocalDateKey(new Date(2026, 11, 31))).toBe('2026-12-31');
   });
 
-  it('uses the local calendar day, not the UTC one', () => {
-    // 01:00 local on the 5th. In any timezone ahead of UTC this is still the 4th in
-    // UTC; the old implementation would have returned the 4th and misfiled the meal.
-    const earlyMorning = new Date(2026, 9, 5, 1, 0, 0);
-    expect(toLocalDateKey(earlyMorning)).toBe('2026-10-05');
-    expect(earlyMorning.toISOString().split('T')[0]).not.toBe('2026-10-05');
+  it('derives the day from local time, not UTC', () => {
+    // The previous implementation used `toISOString().split('T')[0]`, which yields the
+    // UTC date. This asserts the contract directly — "the key must match the local
+    // calendar day" — rather than asserting that UTC and local differ, which is false
+    // when the suite runs in UTC and made this test fail in CI but pass in Pakistan.
+    const localDayKey = (d) => [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
+
+    // Instants chosen to sit near both ends of the day, where the UTC and local
+    // dates disagree in any timezone with a non-zero offset.
+    const instants = [
+      new Date(2026, 9, 5, 1, 0, 0),
+      new Date(2026, 9, 5, 4, 0, 0),
+      new Date(2026, 9, 5, 23, 30, 0),
+      new Date(2026, 0, 1, 0, 30, 0),
+      new Date(2026, 11, 31, 22, 0, 0),
+    ];
+
+    for (const instant of instants) {
+      expect(toLocalDateKey(instant)).toBe(localDayKey(instant));
+    }
+  });
+
+  it('would differ from the old UTC-based implementation somewhere in the year', () => {
+    // Guards the fix itself: scan a year of hours and confirm that a UTC-derived key
+    // disagrees with the local one for at least one instant, in any timezone. This is
+    // the property that makes the bug real rather than theoretical.
+    let disputes = 0;
+    for (let day = 0; day < 365; day += 1) {
+      for (const hour of [0, 1, 2, 3, 4, 5, 20, 21, 22, 23]) {
+        const instant = new Date(2026, 0, 1 + day, hour, 30, 0);
+        const utcKey = instant.toISOString().split('T')[0];
+        if (toLocalDateKey(instant) !== utcKey) disputes += 1;
+      }
+    }
+    if (new Date().getTimezoneOffset() === 0) {
+      // In UTC the two implementations agree by definition; nothing to assert.
+      expect(disputes).toBe(0);
+    } else {
+      expect(disputes).toBeGreaterThan(0);
+    }
   });
 
   it('agrees with todayKey for the current date', () => {
