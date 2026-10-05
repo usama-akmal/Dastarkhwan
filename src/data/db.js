@@ -71,6 +71,23 @@ export function applySchema(instance) {
     usageEvents: '++id, type, date, dishId, mealType, suggestedDishId',
   });
 
+  /**
+   * v4: shopping list.
+   *
+   * Only manually added items and tick state need storing — the derived part of the
+   * list is recomputed from the week's plan on every render, so it cannot go stale
+   * when a meal changes. Storing only the delta keeps that guarantee.
+   */
+  instance.version(4).stores({
+    dishes: 'id, nameEn, proteinType, dishType, cuisineType, isCustom',
+    familyMembers: '++id, name, role',
+    cookingHistory: '++id, date, mealType, dishId',
+    dietaryRules: '++id, ruleType, category, value, isActive',
+    settings: 'id',
+    usageEvents: '++id, type, date, dishId, mealType, suggestedDishId',
+    shoppingItems: '++id, name, checked',
+  });
+
   return instance;
 }
 
@@ -304,6 +321,40 @@ export const recordUsageEvent = async (event, instance = db) => {
 export const getUsageEvents = (instance = db) => instance.usageEvents.toArray();
 export const clearUsageEvents = (instance = db) => instance.usageEvents.clear();
 
+// ------------------------------------------------------ Shopping list
+/**
+ * User-owned parts of the shopping list.
+ *
+ * `addShoppingItem` is used for anything the household typed; tick state applies to
+ * derived items too, which is why a row can exist for a derived name.
+ */
+export const getShoppingItems = (instance = db) => instance.shoppingItems.toArray();
+
+export const addShoppingItem = async (name, instance = db) => {
+  const clean = String(name || '').trim();
+  if (!clean) return null;
+  // Case-insensitive match so "Onions" and "onions" are one line.
+  const existing = await instance.shoppingItems
+    .filter((i) => i.name.toLowerCase() === clean.toLowerCase())
+    .first();
+  if (existing) return existing.id;
+  return instance.shoppingItems.add({ name: clean, checked: false, manual: true, createdAt: new Date().toISOString() });
+};
+
+export const setShoppingItemChecked = async (id, checked, instance = db) =>
+  instance.shoppingItems.update(id, { checked });
+
+/** Tick a derived item that has no stored row yet, by creating one. */
+export const toggleDerivedShoppingItem = async (name, checked, instance = db) => {
+  const existing = await instance.shoppingItems.filter((i) => i.name === name).first();
+  if (existing) return instance.shoppingItems.update(existing.id, { checked });
+  return instance.shoppingItems.add({ name, checked, manual: false, createdAt: new Date().toISOString() });
+};
+
+export const deleteShoppingItem = (id, instance = db) => instance.shoppingItems.delete(id);
+
+export const clearShoppingList = (instance = db) => instance.shoppingItems.clear();
+
 // ------------------------------------------------------ Cooking history
 export const getCookingHistory = (startDate, endDate) => {
   if (startDate && endDate) {
@@ -354,13 +405,14 @@ const BACKUP_VERSION = 2;
 
 /** A JSON-serialisable snapshot of everything the user owns. */
 export async function exportAllData(instance = db) {
-  const [dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents] = await Promise.all([
+  const [dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents, shoppingItems] = await Promise.all([
     instance.dishes.toArray(),
     instance.familyMembers.toArray(),
     instance.cookingHistory.toArray(),
     instance.dietaryRules.toArray(),
     instance.settings.toArray(),
     instance.usageEvents.toArray(),
+    instance.shoppingItems.toArray(),
   ]);
 
   // Usage insights travel with the backup. They are derived from the data above,
@@ -385,9 +437,10 @@ export async function exportAllData(instance = db) {
       cookingHistory: cookingHistory.length,
       dietaryRules: dietaryRules.length,
       usageEvents: usageEvents.length,
+      shoppingItems: shoppingItems.length,
     },
     insights,
-    data: { dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents },
+    data: { dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents, shoppingItems },
   };
 }
 
@@ -413,6 +466,7 @@ export function validateBackup(payload) {
     dietaryRules: Array.isArray(data.dietaryRules) ? data.dietaryRules : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
     usageEvents: Array.isArray(data.usageEvents) ? data.usageEvents : [],
+    shoppingItems: Array.isArray(data.shoppingItems) ? data.shoppingItems : [],
   };
 }
 
@@ -441,6 +495,7 @@ export async function importAllData(payload, instance = db) {
     // Must be listed: Dexie scopes a transaction to the tables it is given, and
     // touching an unlisted table throws at runtime rather than silently no-oping.
     instance.usageEvents,
+    instance.shoppingItems,
     async () => {
       await Promise.all([
         instance.dishes.clear(),
@@ -449,6 +504,7 @@ export async function importAllData(payload, instance = db) {
         instance.dietaryRules.clear(),
         instance.settings.clear(),
         instance.usageEvents.clear(),
+        instance.shoppingItems.clear(),
       ]);
       // bulkPut, not bulkAdd: primary keys are part of the backup and every reference
       // (dishId, preferences keys) depends on them surviving the round trip.
@@ -458,6 +514,7 @@ export async function importAllData(payload, instance = db) {
       if (dietaryRules.length) await instance.dietaryRules.bulkPut(dietaryRules);
       if (data.settings.length) await instance.settings.bulkPut(data.settings);
       if (data.usageEvents.length) await instance.usageEvents.bulkPut(data.usageEvents);
+      if (data.shoppingItems.length) await instance.shoppingItems.bulkPut(data.shoppingItems);
     },
   );
 

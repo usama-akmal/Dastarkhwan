@@ -59,6 +59,7 @@ const PATHS = {
   trash: 'M4 7h16M10 11v6M14 11v6M5 7l1 13a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-13M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3',
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
   filter: 'M4 5h16l-6 7v6l-4 2v-8z',
+  bag: 'M6 8h12l1 12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1zM9 8V6a3 3 0 0 1 6 0v2',
 };
 
 export const Icon = ({ name, size = 20, strokeWidth = 2, className, style, ...rest }) => {

@@ -21,6 +21,7 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ de
 const RecipesPage = lazy(() => import('./pages/RecipesPage').then((m) => ({ default: m.RecipesPage })))
 const FamilyPage = lazy(() => import('./pages/FamilyPage').then((m) => ({ default: m.FamilyPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const ShoppingPage = lazy(() => import('./pages/ShoppingPage').then((m) => ({ default: m.ShoppingPage })))
 
 /** Neutral placeholder while a split chunk loads; avoids a layout jump. */
 const RouteFallback = () => (
@@ -121,6 +122,7 @@ function App() {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/recipes" element={<RecipesPage />} />
           <Route path="/family" element={<FamilyPage />} />
+          <Route path="/shopping" element={<ShoppingPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </Suspense>

@@ -14,6 +14,12 @@ import {
   recordUsageEvent,
   getUsageEvents,
   USAGE_EVENT,
+  getShoppingItems,
+  addShoppingItem,
+  setShoppingItemChecked,
+  toggleDerivedShoppingItem,
+  deleteShoppingItem,
+  clearShoppingList,
   DEFAULT_SETTINGS,
 } from './db.js';
 import { seedDishes } from './seed.js';
@@ -411,5 +417,91 @@ describe('concurrent suggestion logging', () => {
       recordUsageEvent({ ...base, mealType: 'dinner', dishId: 'seed:a' }, db),
     ]);
     expect(await getUsageEvents(db)).toHaveLength(3);
+  });
+});
+
+
+describe('shopping list storage', () => {
+  it('adds a manual item, unticked by default', async () => {
+    await addShoppingItem('Coriander', db);
+    const items = await getShoppingItems(db);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ name: 'Coriander', checked: false, manual: true });
+  });
+
+  it('treats differently-cased names as one line', async () => {
+    await addShoppingItem('Onions', db);
+    await addShoppingItem('onions', db);
+    expect(await getShoppingItems(db)).toHaveLength(1);
+  });
+
+  it('ignores a blank name rather than storing an empty row', async () => {
+    expect(await addShoppingItem('   ', db)).toBeNull();
+    expect(await getShoppingItems(db)).toHaveLength(0);
+  });
+
+  it('stores tick state for a derived item that has no row yet', async () => {
+    // Derived ingredients are recomputed on every render, so only the tick needs
+    // persisting; this creates that row on first tick.
+    await toggleDerivedShoppingItem('chicken', true, db);
+    const items = await getShoppingItems(db);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ name: 'chicken', checked: true, manual: false });
+  });
+
+  it('updates the existing row on a second tick rather than duplicating', async () => {
+    await toggleDerivedShoppingItem('rice', true, db);
+    await toggleDerivedShoppingItem('rice', false, db);
+    const items = await getShoppingItems(db);
+    expect(items).toHaveLength(1);
+    expect(items[0].checked).toBe(false);
+  });
+
+  it('ticks and deletes a manual item by id', async () => {
+    const id = await addShoppingItem('Yoghurt', db);
+    await setShoppingItemChecked(id, true, db);
+    expect((await getShoppingItems(db))[0].checked).toBe(true);
+    await deleteShoppingItem(id, db);
+    expect(await getShoppingItems(db)).toHaveLength(0);
+  });
+
+  it('clears the whole list', async () => {
+    await addShoppingItem('A', db);
+    await toggleDerivedShoppingItem('B', true, db);
+    await clearShoppingList(db);
+    expect(await getShoppingItems(db)).toHaveLength(0);
+  });
+
+  it('survives a backup round trip', async () => {
+    await addShoppingItem('Coriander', db);
+    await toggleDerivedShoppingItem('chicken', true, db);
+    const payload = JSON.parse(JSON.stringify(await exportAllData(db)));
+    expect(payload.data.shoppingItems).toHaveLength(2);
+    expect(payload.counts.shoppingItems).toBe(2);
+
+    await clearShoppingList(db);
+    expect(await getShoppingItems(db)).toHaveLength(0);
+
+    await importAllData(payload, db);
+
+    const restored = await getShoppingItems(db);
+    expect(restored).toHaveLength(2);
+    expect(restored.find((i) => i.name === 'chicken').checked).toBe(true);
+  });
+
+  it('restores from a backup made before the shopping list existed', async () => {
+    const legacy = {
+      format: 'dastarkhwan-backup',
+      version: 1,
+      data: {
+        dishes: [{ id: 'seed:x', nameEn: 'X', isCustom: false }],
+        familyMembers: [],
+        cookingHistory: [],
+        dietaryRules: [],
+        settings: [{ ...DEFAULT_SETTINGS }],
+      },
+    };
+    await expect(importAllData(legacy, db)).resolves.toBeDefined();
+    expect(await getShoppingItems(db)).toHaveLength(0);
   });
 });

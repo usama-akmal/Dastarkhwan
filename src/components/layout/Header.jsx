@@ -7,6 +7,7 @@ const TITLES = {
   '/calendar': { title: 'Calendar' },
   '/recipes': { title: 'Recipes' },
   '/family': { title: 'Family' },
+  '/shopping': { title: 'Shopping' },
   '/settings': { title: 'Settings' },
 };
 
