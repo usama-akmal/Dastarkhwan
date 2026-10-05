@@ -405,15 +405,29 @@ const BACKUP_VERSION = 2;
 
 /** A JSON-serialisable snapshot of everything the user owns. */
 export async function exportAllData(instance = db) {
-  const [dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents, shoppingItems] = await Promise.all([
-    instance.dishes.toArray(),
-    instance.familyMembers.toArray(),
-    instance.cookingHistory.toArray(),
-    instance.dietaryRules.toArray(),
-    instance.settings.toArray(),
-    instance.usageEvents.toArray(),
-    instance.shoppingItems.toArray(),
-  ]);
+  // Read inside one readonly transaction so every table comes from the same
+  // snapshot. Reading them concurrently instead could interleave with a write and
+  // produce a backup whose history rows reference dishes that are not in the file.
+  const [dishes, familyMembers, cookingHistory, dietaryRules, settings, usageEvents, shoppingItems] =
+    await instance.transaction(
+      'r',
+      instance.dishes,
+      instance.familyMembers,
+      instance.cookingHistory,
+      instance.dietaryRules,
+      instance.settings,
+      instance.usageEvents,
+      instance.shoppingItems,
+      async () => Promise.all([
+        instance.dishes.toArray(),
+        instance.familyMembers.toArray(),
+        instance.cookingHistory.toArray(),
+        instance.dietaryRules.toArray(),
+        instance.settings.toArray(),
+        instance.usageEvents.toArray(),
+        instance.shoppingItems.toArray(),
+      ]),
+    );
 
   // Usage insights travel with the backup. They are derived from the data above,
   // but including them means a restored device (or a support conversation) has the
@@ -459,10 +473,40 @@ export function validateBackup(payload) {
   if (!data || !Array.isArray(data.dishes) || !Array.isArray(data.familyMembers)) {
     throw new Error('This backup is missing its dish or family data.');
   }
+
+  // Restoring clears every table first, so a truncated file would wipe the device.
+  // A real backup always has dishes; refuse rather than destroy.
+  if (data.dishes.length === 0) {
+    throw new Error('This backup contains no recipes, so restoring it would erase yours.');
+  }
+
+  const dishes = data.dishes;
+  const dishIds = new Set(dishes.map((d) => d.id));
+  const cookingHistory = Array.isArray(data.cookingHistory) ? data.cookingHistory : [];
+
+  // Referential integrity. Importing a history row whose dish is absent would show
+  // as an unknown dish on the calendar and skew every statistic that reads it.
+  const orphans = cookingHistory.filter((entry) => !dishIds.has(entry.dishId));
+  if (orphans.length > 0) {
+    throw new Error(
+      `This backup is damaged: ${orphans.length} meal${orphans.length === 1 ? '' : 's'} `
+      + `reference recipes that are not in the file.`,
+    );
+  }
+
+  const familyMembers = data.familyMembers.map((member) => {
+    // A preference pointing at a missing dish can never match anything, so drop it
+    // rather than carry dead keys that inflate the coverage figure.
+    const preferences = member.preferences && typeof member.preferences === 'object'
+      ? Object.fromEntries(Object.entries(member.preferences).filter(([dishId]) => dishIds.has(dishId)))
+      : {};
+    return { ...member, preferences };
+  });
+
   return {
-    dishes: data.dishes,
-    familyMembers: data.familyMembers,
-    cookingHistory: Array.isArray(data.cookingHistory) ? data.cookingHistory : [],
+    dishes,
+    familyMembers,
+    cookingHistory,
     dietaryRules: Array.isArray(data.dietaryRules) ? data.dietaryRules : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
     usageEvents: Array.isArray(data.usageEvents) ? data.usageEvents : [],

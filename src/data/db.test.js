@@ -255,9 +255,69 @@ describe('validateBackup', () => {
   });
 
   it('accepts a valid backup and defaults optional collections', () => {
-    const result = validateBackup({ format: 'dastarkhwan-backup', version: 2, data: { dishes: [], familyMembers: [] } });
+    const result = validateBackup({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: { dishes: [{ id: 'seed:x', nameEn: 'X' }], familyMembers: [] },
+    });
     expect(result.cookingHistory).toEqual([]);
     expect(result.dietaryRules).toEqual([]);
+    expect(result.usageEvents).toEqual([]);
+    expect(result.shoppingItems).toEqual([]);
+  });
+
+  it('refuses a backup with no recipes, because restoring clears the device first', () => {
+    // An empty dish list is what a truncated or hand-edited file looks like, and
+    // importing it would erase the user's recipes rather than restore them.
+    expect(() => validateBackup({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: { dishes: [], familyMembers: [] },
+    })).toThrow(/no recipes/i);
+  });
+
+  it('refuses a backup whose history references recipes it does not contain', () => {
+    // Dangling references would restore as "unknown dish" on the calendar and skew
+    // every statistic that reads them.
+    expect(() => validateBackup({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: {
+        dishes: [{ id: 'seed:present', nameEn: 'Present' }],
+        familyMembers: [],
+        cookingHistory: [
+          { dishId: 'seed:present', date: '2026-10-05', mealType: 'dinner' },
+          { dishId: 'seed:missing', date: '2026-10-06', mealType: 'dinner' },
+        ],
+      },
+    })).toThrow(/damaged/i);
+  });
+
+  it('accepts a backup whose every reference resolves', () => {
+    const result = validateBackup({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: {
+        dishes: [{ id: 'seed:a', nameEn: 'A' }],
+        familyMembers: [{ id: 1, name: 'Ammi', preferences: { 'seed:a': 'loves' } }],
+        cookingHistory: [{ dishId: 'seed:a', date: '2026-10-05', mealType: 'dinner' }],
+      },
+    });
+    expect(result.cookingHistory).toHaveLength(1);
+    expect(result.familyMembers[0].preferences).toEqual({ 'seed:a': 'loves' });
+  });
+
+  it('drops preferences that point at dishes the backup does not contain', () => {
+    // Dead keys can never match, and they inflate the preference-coverage figure.
+    const result = validateBackup({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: {
+        dishes: [{ id: 'seed:a', nameEn: 'A' }],
+        familyMembers: [{ id: 1, name: 'Ammi', preferences: { 'seed:a': 'loves', 'seed:gone': 'wont_touch' } }],
+      },
+    });
+    expect(result.familyMembers[0].preferences).toEqual({ 'seed:a': 'loves' });
   });
 });
 
@@ -503,5 +563,78 @@ describe('shopping list storage', () => {
     };
     await expect(importAllData(legacy, db)).resolves.toBeDefined();
     expect(await getShoppingItems(db)).toHaveLength(0);
+  });
+});
+
+
+describe('a rejected import leaves the device untouched', () => {
+  // importAllData clears every table before writing. If validation ran inside the
+  // transaction, a bad file would leave the user with nothing. These pin the
+  // guarantee that validation happens first and a failure changes nothing.
+
+  const snapshot = async () => ({
+    dishes: await db.dishes.count(),
+    members: await db.familyMembers.count(),
+    history: await db.cookingHistory.count(),
+    rules: await db.dietaryRules.count(),
+  });
+
+  it('keeps existing data when the file has no recipes', async () => {
+    await addDish({ nameEn: 'Precious recipe', proteinType: 'beef', dishType: 'curry', dietaryTags: [] }, db);
+    await db.familyMembers.add({ name: 'Ammi', role: 'mother', preferences: {} });
+    const before = await snapshot();
+
+    await expect(importAllData({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: { dishes: [], familyMembers: [] },
+    }, db)).rejects.toThrow(/no recipes/i);
+
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('keeps existing data when the file is damaged', async () => {
+    const before = await snapshot();
+
+    await expect(importAllData({
+      format: 'dastarkhwan-backup',
+      version: 2,
+      data: {
+        dishes: [{ id: 'seed:a', nameEn: 'A' }],
+        familyMembers: [],
+        cookingHistory: [{ dishId: 'seed:missing', date: '2026-10-05', mealType: 'dinner' }],
+      },
+    }, db)).rejects.toThrow(/damaged/i);
+
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('keeps existing data when the file is not a backup at all', async () => {
+    const before = await snapshot();
+    await expect(importAllData({ nope: true }, db)).rejects.toThrow();
+    expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe('export is internally consistent', () => {
+  it('includes a history row in the same snapshot as the dish it references', async () => {
+    // Reading seven tables concurrently could interleave with a write and produce a
+    // backup whose history points at a dish absent from the file. It reads inside a
+    // readonly transaction so the file is one snapshot.
+    const customId = await addDish({ nameEn: 'Snapshot dish', proteinType: 'eggs', dishType: 'curry', dietaryTags: [] }, db);
+    await db.cookingHistory.add({ dishId: customId, date: '2026-10-05', mealType: 'dinner' });
+
+    const payload = await exportAllData(db);
+    const dishIds = new Set(payload.data.dishes.map((d) => d.id));
+    for (const entry of payload.data.cookingHistory) {
+      expect(dishIds.has(entry.dishId)).toBe(true);
+    }
+  });
+
+  it('produces a backup that its own validator accepts', async () => {
+    // Round-trip guarantee: what we write must be what we are willing to read back.
+    await db.familyMembers.add({ name: 'Ammi', role: 'mother', preferences: {} });
+    const payload = await exportAllData(db);
+    expect(() => validateBackup(JSON.parse(JSON.stringify(payload)))).not.toThrow();
   });
 });
