@@ -16,6 +16,7 @@
 import Dexie from 'dexie';
 import { seedDishes } from './seed.js';
 import { normalizePreferences, normalizeRule, canonicalPreference } from '../utils/preferences.js';
+import { computeInsights } from '../utils/insights.js';
 
 export const db = new Dexie('dastarkhwan');
 
@@ -256,6 +257,16 @@ export async function exportAllData(instance = db) {
     instance.settings.toArray(),
   ]);
 
+  // Usage insights travel with the backup. They are derived from the data above,
+  // but including them means a restored device (or a support conversation) has the
+  // same picture without recomputing, and it keeps the measurement the user's own.
+  const insights = computeInsights({
+    history: cookingHistory,
+    dishes,
+    familyMembers,
+    settings: settings[0] || null,
+  });
+
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -267,6 +278,7 @@ export async function exportAllData(instance = db) {
       cookingHistory: cookingHistory.length,
       dietaryRules: dietaryRules.length,
     },
+    insights,
     data: { dishes, familyMembers, cookingHistory, dietaryRules, settings },
   };
 }

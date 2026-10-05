@@ -156,6 +156,19 @@ describe('backup round trip (F3.1 — there was no export/import at all)', () =>
     expect(() => JSON.parse(JSON.stringify(payload))).not.toThrow();
   });
 
+  it('carries usage insights, so measurement survives a device change', async () => {
+    // There is no telemetry in this app; the backup is the only place a household's
+    // usage picture can travel, and it stays the user's own data.
+    await populate();
+    const payload = await exportAllData(db);
+    expect(payload.insights).toBeDefined();
+    expect(payload.insights.totalMeals).toBe(1);
+    expect(payload.insights.daysWithMeals).toBe(1);
+    expect(payload.insights.familyMembers).toBe(1);
+    expect(payload.insights.customDishes).toBe(1);
+    expect(Number.isNaN(payload.insights.mealsPerWeek)).toBe(false);
+  });
+
   it('restores an identical dataset, ids included', async () => {
     await populate();
     const payload = JSON.parse(JSON.stringify(await exportAllData(db)));

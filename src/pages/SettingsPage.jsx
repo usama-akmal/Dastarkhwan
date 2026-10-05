@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useSettings, useDietaryRules } from '../hooks/useDatabase';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSettings, useDietaryRules, useCookingHistory, useDishes, useFamilyMembers } from '../hooks/useDatabase';
 import {
   db,
   restoreDefaultDishes,
@@ -14,6 +14,7 @@ import {
   describeRule,
 } from '../utils/preferences';
 import { useTheme } from '../theme/themeContext';
+import { computeInsights, formatInsightsForSharing } from '../utils/insights';
 import { Icon } from '../components/ui/Icon';
 import { Modal } from '../components/ui/Modal';
 import { RadioGroup, Segmented, Stepper } from '../components/ui/Controls';
@@ -77,7 +78,17 @@ const Section = ({ icon, title, description, children }) => (
 export const SettingsPage = () => {
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
   const { rules, loading: rulesLoading, addRule, deleteRule } = useDietaryRules();
+  const { history } = useCookingHistory();
+  const { dishes } = useDishes();
+  const { members } = useFamilyMembers();
   const { mode, setTheme } = useTheme();
+
+  // Computed on-device from the user's own data. There is no telemetry in this app,
+  // so this is the only way either of us can tell whether it is actually being used.
+  const insights = useMemo(
+    () => computeInsights({ history, dishes, familyMembers: members, settings }),
+    [history, dishes, members, settings],
+  );
 
   const [draft, setDraft] = useState({});
   const [isRuleFormOpen, setIsRuleFormOpen] = useState(false);
@@ -85,6 +96,7 @@ export const SettingsPage = () => {
   const [backupStatus, setBackupStatus] = useState(null);
   const [pendingErase, setPendingErase] = useState(false);
   const [pendingReseed, setPendingReseed] = useState(false);
+  const [insightsCopied, setInsightsCopied] = useState(false);
   const fileInputRef = useRef(null);
 
   // Ask the browser not to evict this origin. There is no server, so eviction is
@@ -281,6 +293,99 @@ export const SettingsPage = () => {
         <button type="button" className="btn btn-secondary btn--block" id="btn-add-rule-start" onClick={() => setIsRuleFormOpen(true)}>
           <Icon name="plus" size={17} /> Add a rule
         </button>
+      </Section>
+
+      {/* ------------------------------------------------------------ Usage */}
+      <Section
+        icon="sparkle"
+        title="Your usage"
+        description="Counted on this device — nothing is sent anywhere"
+      >
+        {insights.totalMeals === 0 ? (
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+            Nothing planned yet. Once you start accepting suggestions, your habits will
+            show up here.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-3)' }}>
+              {[
+                { label: 'Meals planned', value: insights.totalMeals, hint: `${insights.mealsPerWeek}/week` },
+                { label: 'Days used', value: insights.daysWithMeals, hint: `${insights.mealsLast30Days} in last 30` },
+                { label: 'Current streak', value: `${insights.currentStreak}d`, hint: `longest ${insights.longestStreak}d` },
+                { label: 'Distinct dishes', value: insights.distinctDishes, hint: `${insights.distinctProteins} proteins` },
+              ].map((stat) => (
+                <div key={stat.label} style={{
+                  padding: 'var(--space-3)',
+                  background: 'var(--fill-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                }}>
+                  <div className="tabular" style={{
+                    fontFamily: 'var(--font-heading)', fontSize: 'var(--text-xl)',
+                    fontWeight: 'var(--weight-bold)', color: 'var(--accent)', lineHeight: 1.1,
+                  }}>
+                    {stat.value}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
+                    {stat.label}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-muted)' }}>{stat.hint}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* How much of the household's opinion the planner actually knows. */}
+            <div style={{ marginTop: 'var(--space-5)' }}>
+              <div className="row-between" style={{ marginBottom: 'var(--space-1)' }}>
+                <span className="form-label">Preferences rated</span>
+                <span className="tabular" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                  {insights.ratingsGiven}/{insights.ratingsPossible} ({Math.round(insights.ratingCoverage * 100)}%)
+                </span>
+              </div>
+              <div className="stat-bar">
+                <div className="stat-bar__fill" style={{ width: `${Math.min(100, insights.ratingCoverage * 100)}%` }} />
+              </div>
+              <p className="form-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+                {insights.ratingCoverage < 0.25
+                  ? 'The planner is guessing for most dishes. Rating more will noticeably improve suggestions.'
+                  : 'Higher coverage means suggestions follow your family rather than chance.'}
+              </p>
+            </div>
+
+            {insights.customDishes > 0 && (
+              <p className="form-hint" style={{ marginTop: 'var(--space-4)', marginBottom: 0 }}>
+                Plus <span className="tabular">{insights.customDishes}</span> recipe
+                {insights.customDishes === 1 ? '' : 's'} of your own.
+              </p>
+            )}
+
+            <button
+              type="button"
+              id="btn-copy-insights"
+              className="btn btn-secondary btn--block"
+              style={{ marginTop: 'var(--space-4)' }}
+              onClick={async () => {
+                const text = formatInsightsForSharing(insights);
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setInsightsCopied(true);
+                  window.setTimeout(() => setInsightsCopied(false), 2500);
+                } catch {
+                  // Clipboard access can be denied; showing the text is the fallback.
+                  window.prompt('Copy this summary:', text);
+                }
+              }}
+            >
+              <Icon name="download" size={16} />
+              {insightsCopied ? 'Copied' : 'Copy summary'}
+            </button>
+            <p className="form-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+              Counts only — no dish names, no family names, no dates. Safe to paste when
+              reporting a problem.
+            </p>
+          </>
+        )}
       </Section>
 
       {/* ------------------------------------------------------------- Backup */}
