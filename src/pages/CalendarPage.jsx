@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useCookingHistory, useDishes } from '../hooks/useDatabase';
+import { useCookingHistory, useDishes, useSettings } from '../hooks/useDatabase';
 import { db } from '../data/db';
 import { toLocalDateKey, todayKey, monthKeyRange } from '../utils/dates';
 import { Icon } from '../components/ui/Icon';
@@ -16,10 +16,10 @@ const PROTEIN_VARS = {
   vegetables: 'var(--protein-vegetables)',
 };
 
-const MEAL_OPTIONS = [
-  { value: 'lunch', label: 'Lunch' },
-  { value: 'dinner', label: 'Dinner' },
-];
+const LUNCH_OPTION = { value: 'lunch', label: 'Lunch' };
+const DINNER_OPTION = { value: 'dinner', label: 'Dinner' };
+const ALL_MEAL_OPTIONS = [LUNCH_OPTION, DINNER_OPTION];
+const DINNER_ONLY_OPTIONS = [DINNER_OPTION];
 
 export const CalendarPage = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -27,6 +27,12 @@ export const CalendarPage = () => {
   const [isLogOpen, setIsLogOpen] = useState(false);
   const [logDishId, setLogDishId] = useState('');
   const [logMealType, setLogMealType] = useState('dinner');
+
+  const { settings } = useSettings();
+  // The app was configured for one meal a day: logging a lunch would create a meal
+  // the planner can never suggest, and its cooldown would then suppress dinner.
+  const isDinnerOnly = (settings?.mealsPerDay ?? 2) === 1;
+  const mealOptions = isDinnerOnly ? DINNER_ONLY_OPTIONS : ALL_MEAL_OPTIONS;
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -69,6 +75,9 @@ export const CalendarPage = () => {
 
   const openLogForm = () => {
     setLogDishId(dishes?.[0]?.id != null ? String(dishes[0].id) : '');
+    // Always start from the slot this app is actually planning, so a stale "lunch"
+    // left over from a previous two-meal setup cannot be submitted by accident.
+    setLogMealType(isDinnerOnly ? 'dinner' : logMealType);
     setIsLogOpen(true);
   };
 
@@ -76,9 +85,12 @@ export const CalendarPage = () => {
     event.preventDefault();
     const dish = dishes.find((d) => String(d.id) === String(logDishId));
     if (!dish) return;
+    // Guard the stored value too, not just the control: a form submitted without the
+    // selector present must still record the configured slot.
+    const mealType = isDinnerOnly ? 'dinner' : logMealType;
     // Manual entry: reality diverges from the suggestion, and a plan the app cannot
     // correct becomes fiction that poisons every later cooldown.
-    await db.cookingHistory.add({ dishId: dish.id, date: selectedDateKey, mealType: logMealType });
+    await db.cookingHistory.add({ dishId: dish.id, date: selectedDateKey, mealType });
     setIsLogOpen(false);
   };
 
@@ -310,13 +322,33 @@ export const CalendarPage = () => {
               </select>
             </div>
 
-            <Segmented
-              name="log-meal-type"
-              legend="Which meal?"
-              value={logMealType}
-              options={MEAL_OPTIONS}
-              onChange={setLogMealType}
-            />
+            {isDinnerOnly ? (
+              // One meal a day is configured, so the slot is not a question. Stating it
+              // is clearer than a single-option selector that looks interactive.
+              <div>
+                <div className="form-label" style={{ marginBottom: 'var(--space-2)' }}>Which meal?</div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--fill-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--text-sm)',
+                }}>
+                  <Icon name="moon" size={16} style={{ color: 'var(--accent)' }} />
+                  <span>Dinner &mdash; your plan is set to one meal a day</span>
+                </div>
+              </div>
+            ) : (
+              <Segmented
+                name="log-meal-type"
+                legend="Which meal?"
+                value={logMealType}
+                options={mealOptions}
+                onChange={setLogMealType}
+              />
+            )}
 
             <p className="form-hint" style={{ margin: 0 }}>
               Logging a meal resets the cooldowns for that dish, so it won&rsquo;t be suggested again soon.

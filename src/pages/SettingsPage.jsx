@@ -31,7 +31,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const MEAL_OPTIONS = [
-  { value: 2, label: 'Lunch & dinner' },
+  { value: 2, label: 'Lunch/Dinner' },
   { value: 1, label: 'Dinner only' },
 ];
 

@@ -294,13 +294,19 @@ export const HomePage = () => {
       </header>
 
       {mealsPerDay === 1 ? (
-        <SuggestionCard mealType="dinner" suggestionData={dinnerSuggestion} heading="Tonight's meal" mealIcon="moon" />
+        // One meal a day is configured. The section is titled with the same wording
+        // the Settings toggle uses, so the mode is visible on the screen it affects —
+        // previously this heading existed only as an aria-label and was invisible.
+        // ("Tonight's meal" was dropped: it was wrong for a dinner logged after midnight.)
+        <>
+          <SectionHeading icon="moon">Lunch/Dinner</SectionHeading>
+          <SuggestionCard mealType="dinner" suggestionData={dinnerSuggestion} heading="Dinner" mealIcon="moon" />
+        </>
       ) : (
         <>
-          <SectionHeading icon="sun">Lunch</SectionHeading>
+          <SectionHeading icon="sun">Lunch/Dinner</SectionHeading>
           <SuggestionCard mealType="lunch" suggestionData={lunchSuggestion} heading="Lunch" mealIcon="sun" />
 
-          <SectionHeading icon="moon">Dinner</SectionHeading>
           <SuggestionCard mealType="dinner" suggestionData={dinnerSuggestion} heading="Dinner" mealIcon="moon" />
         </>
       )}
